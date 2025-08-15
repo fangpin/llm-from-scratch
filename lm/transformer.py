@@ -246,7 +246,7 @@ class TransformerBlock(torch.nn.Module):
 
 
 class Transformer(torch.nn.Module):
-    def __int__(
+    def __init__(
         self,
         d_model: int,
         num_heads: int,
@@ -257,11 +257,12 @@ class Transformer(torch.nn.Module):
         device=None,
         dtype=None,
     ):
-        self.embeding = Embedding(
+        super().__init__()
+        self.embedding = Embedding(
             num_embeddings=vocab_size, embedding_dim=d_model, device=device, dtype=dtype
         )
-        self.atten = torch.nn.Sequential(
-            *[
+        self.blocks = torch.nn.ModuleList(
+            [
                 TransformerBlock(
                     d_model=d_model,
                     num_heads=num_heads,
@@ -274,12 +275,32 @@ class Transformer(torch.nn.Module):
             ]
         )
         self.norm = RmsNorm(d_model=d_model, device=device, dtype=dtype)
-        self.out_linear = Linear(d_model, vocab_size)
+        self.out_linear = Linear(d_model, vocab_size, device=device, dtype=dtype)
+
+    def forward(self, token_ids: torch.Tensor, train: bool) -> torch.Tensor:
+        x = self.embedding(token_ids)
+        for block in self.blocks:
+            x = block(x, train)
+        x_norm = self.norm(x)
+        logits = self.out_linear(x_norm)
+        return logits
+
+
+class CrossEntropyLoss(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
         self.softmax = Softmax()
 
-    def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
-        x = self.embeding(token_ids)
-        x = self.atten(x)
-        x_norm = self.norm(x)
-        x_output = self.out_linear(x_norm)
-        return self.softmax(x_output)
+    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        # Reshape for cross_entropy, handling any shape of logits
+        logits = einx.rearrange("b... c -> (b...) c", logits)
+        targets = einx.rearrange("b... -> (b...)", targets)
+
+        probs = self.softmax(logits)
+
+        correct_probs = einx.get_at("c[i], i -> ", probs, targets)
+        # correct_probs = probs[targets]
+        nll = -torch.log(correct_probs)
+        mean_loss = einx.mean("... ->", nll)
+
+        return mean_loss
