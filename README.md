@@ -2,64 +2,83 @@
 
 # LLM from Scratch
 
-This repository contains a from-scratch implementation of a Transformer model in PyTorch, built for educational purposes. It includes all the essential building blocks of a modern transformer architecture, written in a clear and understandable way.
+This repository contains a from-scratch implementation of a modern decoder-only Transformer model in PyTorch, built for educational purposes. It includes all the essential building blocks of a modern language model, written in a clear, modular, and understandable way. The goal of this project is to provide a comprehensive resource for learning how large language models are built from the ground up.
 
 ## Features
 
-* Custom implementations of core transformer components.
-* Detailed and well-commented code.
-* Includes modern techniques like RoPE, SwiGLU, and RMSNorm.
-* Custom optimizers (`SGDDecay`, `AdamW`) and a learning rate scheduler.
+*   **From-Scratch Implementation:** Every component of the Transformer model is implemented from scratch using PyTorch, providing a deep understanding of the underlying mechanisms.
+*   **Modern Architecture:** The model incorporates modern techniques used in state-of-the-art language models, including:
+    *   **RMSNorm:** for efficient and stable layer normalization.
+    *   **SwiGLU:** activation function in the feed-forward network for improved performance.
+    *   **Rotary Position Embeddings (RoPE):** for effective positional encoding.
+*   **Custom BPE Tokenizer:** A from-scratch implementation of the Byte Pair Encoding (BPE) tokenizer, which can be trained on any text corpus.
+*   **Custom Optimizers:** Includes custom implementations of `AdamW` and `SGDDecay` optimizers.
+*   **Comprehensive Training and Generation Scripts:** Provides scripts for training the model on a large corpus and for generating text with a trained model.
+*   **Thorough Testing:** A comprehensive test suite using `pytest` and snapshot testing ensures the correctness of the implementation.
 
 ## Implemented Components
 
-* **Modules**: `Linear`, `Embedding`, `RmsNorm`, `SiLu`, `SwiGlu`, `FFN`, `RoPE`, `Softmax`, `ScaledDotProductAttention`, `MultiHeadAttention`, `TransformerBlock`, `Transformer`, `BpeTokenizer`.
-* **Loss Function**: `CrossEntropyLoss`.
-* **Optimizers**: `SGDDecay`, `AdamW`.
-* **Utilities**: `cos_lr_scheduler`, `gradient_clip`.
+This project provides a complete ecosystem for building and training a language model. The key components are:
+
+### Core Model (`lm/transformer.py`)
+
+*   **`Transformer`**: The main model class that combines all the components.
+*   **`TransformerBlock`**: A single block of the Transformer, containing multi-head attention and a feed-forward network.
+*   **`MultiHeadAttention`**: The multi-head self-attention mechanism.
+*   **`ScaledDotProductAttention`**: The core attention mechanism.
+*   **`FFN`**: The position-wise feed-forward network with SwiGLU activation.
+*   **`RoPE`**: Rotary Position Embeddings for injecting positional information.
+*   **`RmsNorm`**: Root Mean Square Layer Normalization.
+*   **`Embedding`**: The token embedding layer.
+*   **`Linear`**: A custom linear layer.
+*   **`Softmax`**: A custom softmax implementation.
+*   **`CrossEntropyLoss`**: A custom cross-entropy loss function.
+
+### Tokenizer (`lm/bpe_tokenizer.py`)
+
+*   **`BpeTokenizer`**: A from-scratch implementation of the BPE tokenizer. It can be trained on a corpus to learn a vocabulary and merges. It also supports special tokens.
+
+### Training and Inference
+
+*   **`lm/training.py`**: A script for training the Transformer model. It includes data loading, a training loop, validation, and checkpointing.
+*   **`lm/generating.py`**: A script for generating text using a trained model with top-p sampling.
+*   **`lm/checkpoint.py`**: Utilities for saving and loading model checkpoints.
+
+### Optimizers and Utilities (`lm/transformer.py`)
+
+*   **`AdamW`**: A custom implementation of the AdamW optimizer.
+*   **`SGDDecay`**: A custom implementation of SGD with learning rate decay.
+*   **`cos_lr_scheduler`**: A cosine learning rate scheduler with warmup.
+*   **`gradient_clip`**: A function for gradient clipping.
 
 ## Architecture
 
-The transformer model in this repository is a decoder-only model, suitable for language modeling tasks. It features:
+The Transformer model in this repository is a decoder-only model, similar to the architecture of models like GPT. It is designed for language modeling tasks. The key architectural features are:
 
-* **Pre-Normalization**: Uses `RmsNorm` for layer normalization before the attention and feed-forward layers.
-* **SwiGLU Activation**: The feed-forward network uses the SwiGLU activation function for better performance.
-* **Rotary Position Embedding (RoPE)**: Incorporates positional information by rotating the query and key vectors in the attention mechanism.
-
-## File Structure
-
-```
-lm/
-├── __init__.py
-├── bpe_tokenizer.py
-├── checkpoint.py
-├── generating.py
-├── training.py
-└── transformer.py
-```
-
-* `bpe_tokenizer.py`: A from-scratch implementation of the Byte Pair Encoding (BPE) tokenizer. It now correctly handles special tokens and whitespace variations, including trailing whitespaces, to align with the behavior of reference tokenizers like `tiktoken`. It also includes an `encode_iterable` method for memory-efficient tokenization of large text streams. The `train` method has been optimized for better performance.
-* `transformer.py`: The core transformer model, including all the building blocks like attention, FFN, and RoPE.
-* `training.py`: A script for training the transformer model on a text corpus.
-* `generating.py`: A script for generating text using a trained model.
-* `checkpoint.py`: Utility functions for saving and loading model checkpoints.
+*   **Pre-Normalization:** The model uses RMSNorm for layer normalization, which is applied *before* the attention and feed-forward layers. This leads to more stable training compared to post-normalization.
+*   **SwiGLU Activation:** The feed-forward network uses the SwiGLU (Swish-Gated Linear Unit) activation function, which has been shown to improve performance in language models.
+*   **Rotary Position Embedding (RoPE):** Instead of traditional positional embeddings, this model uses RoPE to incorporate positional information by rotating the query and key vectors in the attention mechanism. This is a more effective way to handle long sequences.
 
 ## Usage
 
 ### 1. Training the Tokenizer
 
-The `bpe_tokenizer.py` script can be used to train a BPE tokenizer on your own text data.
+You can train the BPE tokenizer on your own text corpus using the `lm/bpe_tokenizer.py` script.
 
 ```bash
-python lm/bpe_tokenizer.py --corpus your_text_file.txt --vocab_size 10000
+python -m lm.bpe_tokenizer --corpus your_text_file.txt --vocab_size 10000
 ```
 
-### 2. Training the Model
+### 2. Preparing the Data
 
-The `training.py` script is used to train the transformer model.
+The training script expects the training and validation data to be in the form of memory-mapped numpy arrays of token IDs. You can use the trained tokenizer to convert your text data into this format.
+
+### 3. Training the Model
+
+The `lm/training.py` script is used to train the Transformer model.
 
 ```bash
-python lm/training.py \
+python -m lm.training \
     --train_data path/to/train_data.bin \
     --val_data path/to/val_data.bin \
     --d_model 512 \
@@ -73,12 +92,12 @@ python lm/training.py \
     --device cuda:0
 ```
 
-### 3. Generating Text
+### 4. Generating Text
 
-Once you have a trained model, you can use `generating.py` to generate text.
+Once you have a trained model, you can use `lm/generating.py` to generate text.
 
 ```bash
-python lm/generating.py \
+python -m lm.generating \
     --model_path path/to/your/checkpoint.pt \
     --tokenizer_path path/to/your/tokenizer.json \
     --prompt "Hello, world!" \
@@ -88,49 +107,37 @@ python lm/generating.py \
     --device cuda:0
 ```
 
-## Installation
+## Testing
 
-To use this code, you will need to have PyTorch and einx installed:
+This project has a comprehensive test suite to ensure the correctness of the implementation. You can run the tests using `pytest`:
 
 ```bash
-pip install torch einx
+pytest
 ```
 
-## Pre-requisites
+The tests cover:
+*   The correctness of each module in the Transformer model by comparing its output with reference implementations.
+*   The BPE tokenizer's encoding and decoding, as well as its training process.
+*   The optimizers and other utilities.
 
-* Python 3.8 or higher
-* PyTorch 1.10 or higher
-* einx
-* regex
+## Dependencies
+
+*   Python 3.8+
+*   PyTorch
+*   NumPy
+*   einx
+*   regex
+*   pytest (for testing)
+
+You can install the dependencies using pip:
+```bash
+pip install -r requirements.txt
+```
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
-
-## Citation
-
-If you use this code in your research, please consider citing it as follows:
-
-```bibtex
-@misc{transformer-from-scratch,
-  author = {Your Name},
-  title = {Transformer from Scratch},
-  year = {2023},
-  publisher = {GitHub},
-  journal = {GitHub repository},
-  howpublished = {\url{https://github.com/your-username/transformer-from-scratch}},
-}
-```
+This project is licensed under the MIT License. See the `LICENSE` file for details.
 
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a pull request or open an issue if you have any suggestions or find any bugs.
-
-## Disclaimer
-
-This implementation is for educational purposes only and may not be suitable for production use.
-
----
-
-*This README was generated by gemini-cli.*
-
