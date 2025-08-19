@@ -38,7 +38,7 @@ lm/
 └── transformer.py
 ```
 
-* `bpe_tokenizer.py`: 从零开始实现的字节对编码 (BPE) 分词器。
+* `bpe_tokenizer.py`: 从零开始实现的字节对编码 (BPE) 分词器。现在可以正确处理特殊令牌和各种空白符，包括尾随的空白符，以与 `tiktoken` 等参考分词器的行为保持一致。它还包括一个 `encode_iterable` 方法，用于对大型文本流进行内存高效的分词。
 * `transformer.py`:核心 Transformer 模型，包括所有构建模块，如注意力、FFN 和 RoPE。
 * `training.py`: 用于在文本语料库上训练 Transformer 模型的脚本。
 * `generating.py`: 用于使用训练好的模型生成文本的脚本。

@@ -38,7 +38,7 @@ lm/
 └── transformer.py
 ```
 
-* `bpe_tokenizer.py`: A from-scratch implementation of the Byte Pair Encoding (BPE) tokenizer.
+* `bpe_tokenizer.py`: A from-scratch implementation of the Byte Pair Encoding (BPE) tokenizer. It now correctly handles special tokens and whitespace variations, including trailing whitespaces, to align with the behavior of reference tokenizers like `tiktoken`. It also includes an `encode_iterable` method for memory-efficient tokenization of large text streams.
 * `transformer.py`: The core transformer model, including all the building blocks like attention, FFN, and RoPE.
 * `training.py`: A script for training the transformer model on a text corpus.
 * `generating.py`: A script for generating text using a trained model.

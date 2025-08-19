@@ -4,12 +4,14 @@ import regex as re
 
 class BpeTokenizer:
     def __init__(self, special_tokens: List[str] | None = None, errors="replace"):
-        self.pattern = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+        self.pattern = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s"""
         self.errors = errors
         self.vcab2id = dict[bytes, int]()
         self.id2vcab = dict[int, bytes]()
         self.merges = list[Tuple[bytes, bytes]]()
-        self.special_tokens = [s.encode("utf-8", errors) for s in special_tokens] if special_tokens else None
+        self.special_tokens = sorted(
+            [s.encode("utf-8", errors) for s in special_tokens] if special_tokens else [], key=len, reverse=True
+        )
 
     def from_pretrained(
         self,
@@ -23,37 +25,74 @@ class BpeTokenizer:
             self.special_tokens = [s.encode("utf-8", self.errors) for s in special_tokens]
         self.vcab2id = {v: k for k, v in self.id2vcab.items()}
 
-    def _pre_token(self, corpus: bytes) -> Iterator[bytes]:
-        if self.special_tokens:
-            escaped_tokens = [re.escape(token) for token in self.special_tokens]
-            pattern = f"({b'|'.join(escaped_tokens)})".encode("utf-8")
-            return re.splititer(pattern, corpus)
-        else:
-            return iter([corpus])
+    def _pre_token(self, corpus: bytes) -> list[bytes]:
+        if not self.special_tokens:
+            return [
+                match.group(0).encode("utf-8", self.errors)
+                for match in re.finditer(self.pattern, corpus.decode("utf-8", self.errors))
+            ]
+
+        pattern = b"|".join(map(re.escape, self.special_tokens))
+        parts = re.split(b"(" + pattern + b")", corpus)
+
+        final_parts = []
+        for part in parts:
+            if not part:
+                continue
+            if part in self.special_tokens:
+                final_parts.append(part)
+            else:
+                final_parts.extend(
+                    [
+                        match.group(0).encode("utf-8", self.errors)
+                        for match in re.finditer(self.pattern, part.decode("utf-8", self.errors))
+                    ]
+                )
+        return final_parts
 
     def encode(self, text: str) -> list[int]:
         bs = text.encode("utf-8", self.errors)
         pre_tokens = self._pre_token(bs)
-        tokens = [tuple(bytes([c]) for c in b) for b in pre_tokens]
-        for merge in self.merges:
-            new_tokens = []
-            for token in tokens:
-                i = 0
-                new_token = []
-                while i < len(token):
-                    if i < len(token) - 1 and token[i] == merge[0] and token[i + 1] == merge[1]:
-                        new_token.append(merge[0] + merge[1])
-                        i += 2
-                    else:
-                        new_token.append(token[i])
-                        i += 1
-                new_tokens.append(new_token)
-            tokens = new_tokens
-        token_ids = list[int]()
-        for token in tokens:
-            for vcab in token:
-                token_ids.append(self.vcab2id[vcab])
+
+        token_ids = []
+        for pre_token in pre_tokens:
+            if pre_token in self.special_tokens:
+                token_ids.append(self.vcab2id[pre_token])
+            else:
+                # This part is the same as before
+                tokens = tuple(bytes([c]) for c in pre_token)
+                while True:
+                    pair_cnt = dict[tuple[bytes, bytes], int]()
+                    for pair in zip(tokens[:-1], tokens[1:]):
+                        pair_cnt[pair] = pair_cnt.get(pair, 0) + 1
+
+                    if not pair_cnt:
+                        break
+
+                    # Find the merge with the lowest rank
+                    best_pair = min(pair_cnt, key=lambda p: self.merges.index(p) if p in self.merges else float("inf"))
+
+                    if best_pair not in self.merges:
+                        break
+
+                    new_tokens = []
+                    i = 0
+                    while i < len(tokens):
+                        if i < len(tokens) - 1 and tokens[i] == best_pair[0] and tokens[i + 1] == best_pair[1]:
+                            new_tokens.append(best_pair[0] + best_pair[1])
+                            i += 2
+                        else:
+                            new_tokens.append(tokens[i])
+                            i += 1
+                    tokens = tuple(new_tokens)
+
+                for vcab in tokens:
+                    token_ids.append(self.vcab2id[vcab])
         return token_ids
+
+    def encode_iterable(self, iterable: Iterator[str]) -> Iterator[int]:
+        for text in iterable:
+            yield from self.encode(text)
 
     def decode(self, token_ids: list[int]) -> str:
         vcabs = [self.id2vcab.get(i, b"\xef\xbf\xbd") for i in token_ids]
@@ -77,11 +116,10 @@ class BpeTokenizer:
 
         word_cnt: Dict[Tuple[bytes, ...], int] = {}
         for pre_token in pre_tokens:
-            for word in re.finditer(self.pattern, pre_token.decode("utf-8", self.errors)):
-                bs = tuple(bytes([b]) for b in word.group(0).encode("utf-8", self.errors))
-                if not bs:
-                    continue
-                word_cnt[bs] = word_cnt.get(bs, 0) + 1
+            bs = tuple(bytes([b]) for b in pre_token)
+            if not bs:
+                continue
+            word_cnt[bs] = word_cnt.get(bs, 0) + 1
 
         while len(self.vcab2id) < vocab_size:
             pair_cnt = dict[tuple[bytes, bytes], int]()
