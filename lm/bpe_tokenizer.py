@@ -1,14 +1,15 @@
-from typing import List, Tuple, Dict, Iterator
+from collections.abc import Iterator
 import regex as re
+import os
 
 
 class BpeTokenizer:
-    def __init__(self, special_tokens: List[str] | None = None, errors="replace"):
+    def __init__(self, special_tokens: list[str] | None = None, errors="replace"):
         self.pattern = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s"""
         self.errors = errors
         self.vcab2id = dict[bytes, int]()
         self.id2vcab = dict[int, bytes]()
-        self.merges = list[Tuple[bytes, bytes]]()
+        self.merges = list[tuple[bytes, bytes]]()
         self.special_tokens = sorted(
             [s.encode("utf-8", errors) for s in special_tokens] if special_tokens else [], key=len, reverse=True
         )
@@ -16,7 +17,7 @@ class BpeTokenizer:
     def from_pretrained(
         self,
         id2vcab: dict[int, bytes],
-        merges: list[Tuple[bytes, bytes]],
+        merges: list[tuple[bytes, bytes]],
         special_tokens: list[str] | None = None,
     ):
         self.id2vcab = id2vcab
@@ -59,7 +60,6 @@ class BpeTokenizer:
             if pre_token in self.special_tokens:
                 token_ids.append(self.vcab2id[pre_token])
             else:
-                # This part is the same as before
                 tokens = tuple(bytes([c]) for c in pre_token)
                 while True:
                     pair_cnt = dict[tuple[bytes, bytes], int]()
@@ -99,13 +99,21 @@ class BpeTokenizer:
         bs = b"".join(vcabs)
         return bs.decode("utf-8", self.errors)
 
-    def train(self, corpus: bytes, vocab_size: int):
+    def train(self, input_path: str | os.PathLike, vocab_size: int, special_tokens: list[str]):
         """
         Train the BPE tokenizer on the given corpus.
 
         :param corpus: A binary file-like object containing the training data.
         :param vocab_size: The desired vocabulary size.
         """
+        self.special_tokens = sorted(
+            [s.encode("utf-8", self.errors) for s in special_tokens] if special_tokens else [], key=len, reverse=True
+        )
+
+        corpus = list[bytes]()
+        with open(input_path) as f:
+            corpus = f.read().encode("utf-8", self.errors)
+
         for token in self.special_tokens:
             self.vcab2id[token] = len(self.vcab2id)
 
@@ -114,74 +122,55 @@ class BpeTokenizer:
 
         pre_tokens = self._pre_token(corpus)
 
-        word_cnt: Dict[Tuple[bytes, ...], int] = {}
+        word_cnt: dict[tuple[bytes, ...], int] = {}
         for pre_token in pre_tokens:
+            if pre_token in self.special_tokens:
+                continue
             bs = tuple(bytes([b]) for b in pre_token)
             if not bs:
                 continue
             word_cnt[bs] = word_cnt.get(bs, 0) + 1
 
+        pair_cnt = dict[tuple[bytes, bytes], int]()
+        for word, cnt in word_cnt.items():
+            for pair in zip(word[:-1], word[1:]):
+                pair_cnt[pair] = pair_cnt.get(pair, 0) + cnt
+
+        def update_pair_counts(word: tuple[bytes, ...], pair_cnt: dict[tuple[bytes, bytes], int], cnt: int, sign=1):
+            for pair in zip(word[:-1], word[1:]):
+                pair_cnt[pair] = pair_cnt.get(pair, 0) + cnt * sign
+                if pair_cnt.get(pair, 0) <= 0:
+                    del pair_cnt[pair]
+
         while len(self.vcab2id) < vocab_size:
-            pair_cnt = dict[tuple[bytes, bytes], int]()
+            best_pair = max(pair_cnt.keys(), key=lambda p: (pair_cnt.get(p, 0), p))
+            self.vcab2id[best_pair[0] + best_pair[1]] = len(self.vcab2id)
+            self.merges.append(best_pair)
+
+            new_word_cnt: dict[tuple[bytes, ...], int] = {}
+            merged = False
             for word, cnt in word_cnt.items():
-                if len(word) < 2:
-                    continue
-                for pair in zip(word[:-1], word[1:]):
-                    pair_cnt[pair] = pair_cnt.get(pair, 0) + cnt
-
-            if not pair_cnt:
-                break  # No more pairs to merge
-
-            cnt, pair = max(((cnt, pair) for pair, cnt in pair_cnt.items()))
-            self.vcab2id[pair[0] + pair[1]] = len(self.vcab2id)
-            self.merges.append(pair)
-
-            new_word_cnt: Dict[Tuple[bytes, ...], int] = {}
-            for word, cnt in word_cnt.items():
-                new_word = []
+                new_word_list = []
                 i = 0
                 while i < len(word):
-                    if i < len(word) - 1 and word[i] == pair[0] and word[i + 1] == pair[1]:
-                        new_word.append(word[i] + word[i + 1])
+                    if i < len(word) - 1 and word[i] == best_pair[0] and word[i + 1] == best_pair[1]:
+                        new_word_list.append(best_pair[0] + best_pair[1])
                         i += 2
                     else:
-                        new_word.append(word[i])
+                        new_word_list.append(word[i])
                         i += 1
-                new_word_tuple = tuple(new_word)
-                new_word_cnt[new_word_tuple] = new_word_cnt.get(new_word_tuple, 0) + cnt
 
+                new_word = tuple(new_word_list)
+                if word != new_word:
+                    merged = True
+                    update_pair_counts(word, pair_cnt, cnt, -1)
+                    update_pair_counts(new_word, pair_cnt, cnt, 1)
+
+                new_word_cnt[new_word] = new_word_cnt.get(new_word, 0) + cnt
+
+            if not merged:
+                break
             word_cnt = new_word_cnt
+
         self.id2vcab = {id: vcab for vcab, id in self.vcab2id.items()}
-        return self.vcab2id, self.merges
-
-
-if __name__ == "__main__":
-    text = b"low low low low low lower lower widest widest widest newest newest newest newest newest newest"
-    special_tokens = [b"<|endoftext|>"]
-    t = BpeTokenizer(special_tokens)
-    t.train(text, 256 + 4)
-    print(t.vcab2id)
-    print("*" * 30)
-
-    print(t.merges)
-    print("*" * 30)
-
-    string1 = "lower newest widest"
-    token_ids = t.encode(string1)
-    print(token_ids)
-    print("*" * 30)
-
-    string2 = t.decode(token_ids)
-    print(string2)
-    print("*" * 30)
-
-    assert string1 == string2
-
-    # takes about 30 mins
-    # with open("TinyStoriesV2-GPT4-train.txt", "rb") as f:
-    #     text = f.read()
-    #     t = BpeTokenizer(special_tokens)
-    #     t.train(text, 10000)
-    #     print(t.vcab2id)
-    #     print("*" * 30)
-    #     print(t.merges)
+        return self.id2vcab, self.merges

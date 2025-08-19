@@ -4,3 +4,4 @@ lm/TinyStoriesV2-GPT4-valid.txt
 data
 lm/__pycache__
 tests/__pycache__
+output.prof
