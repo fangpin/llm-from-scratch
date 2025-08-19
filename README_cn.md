@@ -1,30 +1,30 @@
 [English](./README.md)
 
-# 从零开始的 Transformer
+# 从零开始的 LLM
 
 本仓库包含一个用于教育目的的、从零开始的 PyTorch Transformer 模型实现。它包含了现代 Transformer 架构的所有基本构建模块，代码清晰易懂。
 
 ## 特性
 
-*   自定义实现 Transformer 的核心组件。
-*   详细且注释良好的代码。
-*   包含 RoPE、SwiGLU 和 RMSNorm 等现代技术。
-*   自定义优化器 (`SGDDecay`, `AdamW`) 和学习率调度器。
+* 自定义实现 Transformer 的核心组件。
+* 详细且注释良好的代码。
+* 包含 RoPE、SwiGLU 和 RMSNorm 等现代技术。
+* 自定义优化器 (`SGDDecay`, `AdamW`) 和学习率调度器。
 
 ## 已实现的组件
 
-*   **模块**: `Linear`, `Embedding`, `RmsNorm`, `SiLu`, `SwiGlu`, `FFN`, `RoPE`, `Softmax`, `ScaledDotProductAttention`, `MultiHeadAttention`, `TransformerBlock`, `Transformer`, `BpeTokenizer`.
-*   **损失函数**: `CrossEntropyLoss`.
-*   **优化器**: `SGDDecay`, `AdamW`.
-*   **工具**: `cos_lr_scheduler`, `gradient_clip`.
+* **模块**: `Linear`, `Embedding`, `RmsNorm`, `SiLu`, `SwiGlu`, `FFN`, `RoPE`, `Softmax`, `ScaledDotProductAttention`, `MultiHeadAttention`, `TransformerBlock`, `Transformer`, `BpeTokenizer`.
+* **损失函数**: `CrossEntropyLoss`.
+* **优化器**: `SGDDecay`, `AdamW`.
+* **工具**: `cos_lr_scheduler`, `gradient_clip`.
 
 ## 架构
 
 本仓库中的 Transformer 模型是一个仅解码器模型，适用于语言建模任务。其特点包括：
 
-*   **预归一化 (Pre-Normalization)**: 在注意力层和前馈网络层之前使用 `RmsNorm` 进行层归一化。
-*   **SwiGLU 激活函数**: 前馈网络使用 SwiGLU 激活函数以获得更好的性能。
-*   **旋转位置嵌入 (RoPE)**: 通过旋转注意力机制中的查询和键向量来融合位置信息。
+* **预归一化 (Pre-Normalization)**: 在注意力层和前馈网络层之前使用 `RmsNorm` 进行层归一化。
+* **SwiGLU 激活函数**: 前馈网络使用 SwiGLU 激活函数以获得更好的性能。
+* **旋转位置嵌入 (RoPE)**: 通过旋转注意力机制中的查询和键向量来融合位置信息。
 
 ## 文件结构
 
@@ -38,11 +38,11 @@ lm/
 └── transformer.py
 ```
 
-*   `bpe_tokenizer.py`: 从零开始实现的字节对编码 (BPE) 分词器。
-*   `transformer.py`:核心 Transformer 模型，包括所有构建模块，如注意力、FFN 和 RoPE。
-*   `training.py`: 用于在文本语料库上训练 Transformer 模型的脚本。
-*   `generating.py`: 用于使用训练好的模型生成文本的脚本。
-*   `checkpoint.py`: 用于保存和加载模型检查点的实用函数。
+* `bpe_tokenizer.py`: 从零开始实现的字节对编码 (BPE) 分词器。
+* `transformer.py`:核心 Transformer 模型，包括所有构建模块，如注意力、FFN 和 RoPE。
+* `training.py`: 用于在文本语料库上训练 Transformer 模型的脚本。
+* `generating.py`: 用于使用训练好的模型生成文本的脚本。
+* `checkpoint.py`: 用于保存和加载模型检查点的实用函数。
 
 ## 使用方法
 
@@ -98,10 +98,10 @@ pip install torch einx
 
 ## 先决条件
 
-*   Python 3.8 或更高版本
-*   PyTorch 1.10 或更高版本
-*   einx
-*   regex
+* Python 3.8 或更高版本
+* PyTorch 1.10 或更高版本
+* einx
+* regex
 
 ## 许可证
 
@@ -130,6 +130,7 @@ pip install torch einx
 
 此实现仅用于教育目的，可能不适合生产使用。
 
---- 
+---
 
 *该 README 由 gemini-cli 自动生成。*
+

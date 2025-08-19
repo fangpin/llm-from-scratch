@@ -2,12 +2,10 @@ import torch
 import numpy as np
 import argparse
 from lm.checkpoint import save_checkpoint
-from transformer import *
+from .transformer import *
 
 
-def get_batch(
-    x: np.ndarray, batch_size: int, context_length: int, device: str
-) -> tuple[torch.Tensor, torch.Tensor]:
+def get_batch(x: np.ndarray, batch_size: int, context_length: int, device: str) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Generates a batch of input and target sequences from the tokenized data.
 
@@ -24,15 +22,8 @@ def get_batch(
     ix = torch.randint(0, len(x) - context_length, (batch_size,))
 
     # Create the input and target sequences
-    input_seqs = torch.stack(
-        [torch.from_numpy(x[i : i + context_length].astype(np.int64)) for i in ix]
-    )
-    target_seqs = torch.stack(
-        [
-            torch.from_numpy(x[i + 1 : i + 1 + context_length].astype(np.int64))
-            for i in ix
-        ]
-    )
+    input_seqs = torch.stack([torch.from_numpy(x[i : i + context_length].astype(np.int64)) for i in ix])
+    target_seqs = torch.stack([torch.from_numpy(x[i + 1 : i + 1 + context_length].astype(np.int64)) for i in ix])
 
     # Move the tensors to the specified device
     return input_seqs.to(device), target_seqs.to(device)
@@ -43,34 +34,22 @@ def train():
 
     # Model Hyperparameters
     parser.add_argument("--d_model", type=int, default=512, help="Model dimension")
-    parser.add_argument(
-        "--num_heads", type=int, default=8, help="Number of attention heads"
-    )
+    parser.add_argument("--num_heads", type=int, default=8, help="Number of attention heads")
     parser.add_argument("--d_ff", type=int, default=2048, help="Feed-forward dimension")
     parser.add_argument("--vocab_size", type=int, default=10000, help="Vocabulary size")
-    parser.add_argument(
-        "--num_layers", type=int, default=6, help="Number of transformer layers"
-    )
-    parser.add_argument(
-        "--max_seq_len", type=int, default=512, help="Maximum sequence length"
-    )
+    parser.add_argument("--num_layers", type=int, default=6, help="Number of transformer layers")
+    parser.add_argument("--max_seq_len", type=int, default=512, help="Maximum sequence length")
 
     # Optimizer Hyperparameters
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
     parser.add_argument("--beta1", type=float, default=0.9, help="AdamW beta1")
     parser.add_argument("--beta2", type=float, default=0.999, help="AdamW beta2")
-    parser.add_argument(
-        "--weight_decay", type=float, default=1e-3, help="AdamW weight decay"
-    )
+    parser.add_argument("--weight_decay", type=float, default=1e-3, help="AdamW weight decay")
 
     # Training Hyperparameters
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
-    parser.add_argument(
-        "--context_length", type=int, default=256, help="Context length"
-    )
-    parser.add_argument(
-        "--iterations", type=int, default=10000, help="Number of training iterations"
-    )
+    parser.add_argument("--context_length", type=int, default=256, help="Context length")
+    parser.add_argument("--iterations", type=int, default=10000, help="Number of training iterations")
     parser.add_argument(
         "--device",
         type=str,
@@ -101,9 +80,7 @@ def train():
         default=100,
         help="Interval for logging training loss",
     )
-    parser.add_argument(
-        "--val_interval", type=int, default=500, help="Interval for running validation"
-    )
+    parser.add_argument("--val_interval", type=int, default=500, help="Interval for running validation")
     parser.add_argument(
         "--checkpoint_interval",
         type=int,
@@ -149,9 +126,7 @@ def train():
     print("Starting training...")
     for i in range(args.iterations):
         # Get a batch of training data
-        inputs, targets = get_batch(
-            train_data, args.batch_size, args.context_length, args.device
-        )
+        inputs, targets = get_batch(train_data, args.batch_size, args.context_length, args.device)
 
         # Forward pass
         logits = model(inputs, train=True)
@@ -178,9 +153,7 @@ def train():
             val_loss = 0
             with torch.no_grad():
                 for _ in range(100):  # 100 batches for validation
-                    val_inputs, val_targets = get_batch(
-                        val_data, args.batch_size, args.context_length, args.device
-                    )
+                    val_inputs, val_targets = get_batch(val_data, args.batch_size, args.context_length, args.device)
                     val_logits = model(val_inputs, train=False)
                     val_loss += criterion(val_logits, val_targets).item()
             val_loss /= 100
@@ -194,9 +167,7 @@ def train():
                 "optimizer": optimizer.state_dict(),
                 "iteration": i,
             }
-            save_checkpoint(
-                model, optimizer, i, os.path.join(args.checkpoint_path, f"chpt_{i}.pt")
-            )
+            save_checkpoint(model, optimizer, i, os.path.join(args.checkpoint_path, f"chpt_{i}.pt"))
             print(f"Saved checkpoint at iteration {i}")
 
 

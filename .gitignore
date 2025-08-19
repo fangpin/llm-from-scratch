@@ -2,3 +2,5 @@ lm/TinyStoriesV2-GPT4-train.txt
 lm/TinyStoriesV2-GPT4-valid.txt
 .DS_Store
 data
+lm/__pycache__
+tests/__pycache__

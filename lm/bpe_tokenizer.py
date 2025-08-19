@@ -3,13 +3,25 @@ import regex as re
 
 
 class BpeTokenizer:
-    def __init__(self, special_tokens: List[bytes], errors="replace"):
+    def __init__(self, special_tokens: List[str] | None = None, errors="replace"):
         self.pattern = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
         self.errors = errors
         self.vcab2id = dict[bytes, int]()
         self.id2vcab = dict[int, bytes]()
         self.merges = list[Tuple[bytes, bytes]]()
-        self.special_tokens = special_tokens
+        self.special_tokens = [s.encode("utf-8", errors) for s in special_tokens] if special_tokens else None
+
+    def from_pretrained(
+        self,
+        id2vcab: dict[int, bytes],
+        merges: list[Tuple[bytes, bytes]],
+        special_tokens: list[str] | None = None,
+    ):
+        self.id2vcab = id2vcab
+        self.merges = merges
+        if special_tokens:
+            self.special_tokens = [s.encode("utf-8", self.errors) for s in special_tokens]
+        self.vcab2id = {v: k for k, v in self.id2vcab.items()}
 
     def _pre_token(self, corpus: bytes) -> Iterator[bytes]:
         if self.special_tokens:
@@ -29,11 +41,7 @@ class BpeTokenizer:
                 i = 0
                 new_token = []
                 while i < len(token):
-                    if (
-                        i < len(token) - 1
-                        and token[i] == merge[0]
-                        and token[i + 1] == merge[1]
-                    ):
+                    if i < len(token) - 1 and token[i] == merge[0] and token[i + 1] == merge[1]:
                         new_token.append(merge[0] + merge[1])
                         i += 2
                     else:
@@ -69,12 +77,8 @@ class BpeTokenizer:
 
         word_cnt: Dict[Tuple[bytes, ...], int] = {}
         for pre_token in pre_tokens:
-            for word in re.finditer(
-                self.pattern, pre_token.decode("utf-8", self.errors)
-            ):
-                bs = tuple(
-                    bytes([b]) for b in word.group(0).encode("utf-8", self.errors)
-                )
+            for word in re.finditer(self.pattern, pre_token.decode("utf-8", self.errors)):
+                bs = tuple(bytes([b]) for b in word.group(0).encode("utf-8", self.errors))
                 if not bs:
                     continue
                 word_cnt[bs] = word_cnt.get(bs, 0) + 1
@@ -99,11 +103,7 @@ class BpeTokenizer:
                 new_word = []
                 i = 0
                 while i < len(word):
-                    if (
-                        i < len(word) - 1
-                        and word[i] == pair[0]
-                        and word[i + 1] == pair[1]
-                    ):
+                    if i < len(word) - 1 and word[i] == pair[0] and word[i + 1] == pair[1]:
                         new_word.append(word[i] + word[i + 1])
                         i += 2
                     else:
