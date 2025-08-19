@@ -26,45 +26,66 @@
 *   **SwiGLU 激活函数**: 前馈网络使用 SwiGLU 激活函数以获得更好的性能。
 *   **旋转位置嵌入 (RoPE)**: 通过旋转注意力机制中的查询和键向量来融合位置信息。
 
-## 分词器
+## 文件结构
 
-本仓库还包含一个在 `lm/bpe_tokenizer.py` 中从零开始实现的字节对编码 (BPE) 分词器。
+```
+lm/
+├── __init__.py
+├── bpe_tokenizer.py
+├── checkpoint.py
+├── generating.py
+├── training.py
+└── transformer.py
+```
 
-*   **`BpeTokenizer`**: 一个可以在文本语料库上进行训练的类，用于学习 BPE 词汇表和合并规则。然后，它可以用来将文本编码为词元。
+*   `bpe_tokenizer.py`: 从零开始实现的字节对编码 (BPE) 分词器。
+*   `transformer.py`:核心 Transformer 模型，包括所有构建模块，如注意力、FFN 和 RoPE。
+*   `training.py`: 用于在文本语料库上训练 Transformer 模型的脚本。
+*   `generating.py`: 用于使用训练好的模型生成文本的脚本。
+*   `checkpoint.py`: 用于保存和加载模型检查点的实用函数。
 
 ## 使用方法
 
-以下是如何初始化和使用 `Transformer` 模型的简单示例：
+### 1. 训练分词器
 
-```python
-import torch
-from lm.transformer import Transformer
+`bpe_tokenizer.py` 脚本可用于在您自己的文本数据上训练 BPE 分词器。
 
-# 模型参数
-d_model = 512
-num_heads = 8
-d_ff = 2048
-vocab_size = 10000
-num_layers = 6
-max_seq_len = 512
+```bash
+python lm/bpe_tokenizer.py --corpus your_text_file.txt --vocab_size 10000
+```
 
-# 创建模型实例
-model = Transformer(
-    d_model=d_model,
-    num_heads=num_heads,
-    d_ff=d_ff,
-    vocab_size=vocab_size,
-    num_layers=num_layers,
-    max_seq_len=max_seq_len,
-)
+### 2. 训练模型
 
-# 创建一个虚拟输入
-token_ids = torch.randint(0, vocab_size, (1, max_seq_len))
+`training.py` 脚本用于训练 Transformer 模型。
 
-# 执行前向传播
-logits = model(token_ids, train=True)
+```bash
+python lm/training.py \
+    --train_data path/to/train_data.bin \
+    --val_data path/to/val_data.bin \
+    --d_model 512 \
+    --num_heads 8 \
+    --d_ff 2048 \
+    --vocab_size 10000 \
+    --num_layers 6 \
+    --max_seq_len 512 \
+    --batch_size 32 \
+    --iterations 10000 \
+    --device cuda:0
+```
 
-print(logits.shape)
+### 3. 生成文本
+
+一旦你有了训练好的模型，你就可以使用 `generating.py` 来生成文本。
+
+```bash
+python lm/generating.py \
+    --model_path path/to/your/checkpoint.pt \
+    --tokenizer_path path/to/your/tokenizer.json \
+    --prompt "Hello, world!" \
+    --max_tokens 100 \
+    --temperature 0.8 \
+    --top_p 0.9 \
+    --device cuda:0
 ```
 
 ## 安装
@@ -74,3 +95,41 @@ print(logits.shape)
 ```bash
 pip install torch einx
 ```
+
+## 先决条件
+
+*   Python 3.8 或更高版本
+*   PyTorch 1.10 或更高版本
+*   einx
+*   regex
+
+## 许可证
+
+本项目采用 MIT 许可证。有关详细信息，请参阅 [LICENSE](LICENSE) 文件。
+
+## 引文
+
+如果您在研究中使用此代码，请考虑按如下方式引用：
+
+```bibtex
+@misc{transformer-from-scratch,
+  author = {Your Name},
+  title = {Transformer from Scratch},
+  year = {2023},
+  publisher = {GitHub},
+  journal = {GitHub repository},
+  howpublished = {\\url{https://github.com/your-username/transformer-from-scratch}},
+}
+```
+
+## 贡献
+
+欢迎贡献！如果您有任何建议或发现任何错误，请随时提交拉取请求或提出问题。
+
+## 免责声明
+
+此实现仅用于教育目的，可能不适合生产使用。
+
+--- 
+
+*该 README 由 gemini-cli 自动生成。*
