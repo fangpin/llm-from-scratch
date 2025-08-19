@@ -1,7 +1,8 @@
 import torch
 import math
 import einx
-import numpy as np
+from typing import Optional, overload, Union, TypeAlias, Dict, Tuple, Any
+from collections.abc import Callable, Iterable
 
 
 class Linear(torch.nn.Module):
@@ -276,6 +277,7 @@ class Transformer(torch.nn.Module):
         )
         self.norm = RmsNorm(d_model=d_model, device=device, dtype=dtype)
         self.out_linear = Linear(d_model, vocab_size, device=device, dtype=dtype)
+        self.max_seq_len = max_seq_len
 
     def forward(self, token_ids: torch.Tensor, train: bool) -> torch.Tensor:
         x = self.embedding(token_ids)
@@ -304,3 +306,141 @@ class CrossEntropyLoss(torch.nn.Module):
         mean_loss = einx.mean("... ->", nll)
 
         return mean_loss
+
+
+class SGDDecay(torch.optim.Optimizer):
+    def __init__(self, params, lr=1e-3) -> None:
+        if lr < 0:
+            raise ValueError(f"invalid learning rate: {lr}")
+        defaults = {"lr": lr}
+        super().__init__(params, defaults)
+
+    @overload
+    def step(self, closure: None = None) -> None: ...
+
+    @overload
+    def step(self, closure: Callable[[], float]) -> float: ...
+
+    def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]:
+        loss = None if closure is None else closure()
+        for group in self.param_groups:
+            lr = group["lr"]
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+                state = self.state[p]
+                t = state.get("t", 0)
+                grad = p.grad.data
+                p.data -= lr / math.sqrt(t + 1) * grad
+                state["t"] = t + 1
+        return loss
+
+
+ParamsT: TypeAlias = Union[
+    Iterable[torch.Tensor], Iterable[Dict[str, Any]], Iterable[Tuple[str, torch.Tensor]]
+]
+
+
+class AdamW(torch.optim.Optimizer):
+    def __init__(
+        self,
+        params: ParamsT,
+        lr=1e-3,
+        beta1=0.9,
+        beta2=0.999,
+        weight_decay=1e-3,
+        delta=1e-8,
+    ):
+        if lr < 0:
+            raise ValueError(f"invalid learning rate: {lr}")
+        defaults = {
+            "lr": lr,
+            "beta1": beta1,
+            "beta2": beta2,
+            "weight_decay": weight_decay,
+            "delta": delta,
+        }
+        super().__init__(params, defaults)
+
+    @overload
+    def step(self, closure: None = None) -> None: ...
+
+    @overload
+    def step(self, closure: Callable[[], float]) -> float: ...
+
+    def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]:
+        loss = None if closure is None else closure()
+        for group in self.param_groups:
+            lr = group["lr"]
+            beta1 = group["beta1"]
+            beta2 = group["beta2"]
+            weight_decay = group["weight_decay"]
+            delta = group["delta"]
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+                state = self.state[p]
+
+                # State initialization
+                if len(state) == 0:
+                    state["t"] = 0
+                    state["m"] = torch.zeros_like(p.data)
+                    state["sm"] = torch.zeros_like(p.data)
+
+                m, sm = state["m"], state["sm"]
+                t = state["t"] + 1
+
+                grad = p.grad.data
+
+                # Update biased first moment estimate
+                m.mul_(beta1).add_(grad, alpha=1.0 - beta1)
+                # Update biased second raw moment estimate
+                sm.mul_(beta2).addcmul_(grad, grad, value=1.0 - beta2)
+
+                # Bias correction
+                m_hat = m / (1.0 - beta1**t)
+                sm_hat = sm / (1.0 - beta2**t)
+
+                # Update parameters
+                p.data.addcdiv_(m_hat, torch.sqrt(sm_hat) + delta, value=-lr)
+
+                # Weight decay
+                if weight_decay != 0:
+                    p.data.add_(p.data, alpha=-lr * weight_decay)
+
+                state["t"] = t
+        return loss
+
+
+def cos_lr_scheduler(t_w: int, t_c: int, t: int, lr_max: float, lr_min: float) -> float:
+    if t <= t_w:
+        return lr_max * t / t_w
+    elif t_w < t < t_c:
+        return lr_min + 0.5 * (lr_max - lr_min) * (
+            1 + math.cos(math.pi * (t - t_w) / (t_c - t_w))
+        )
+    else:
+        return lr_min
+
+
+def gradient_clip(params: Iterable[torch.Tensor], max_norm: float, delta=1e-6):
+    with torch.no_grad():
+        for param in params:
+            if param.grad is None:
+                continue
+            grad_norm = torch.linalg.norm(param.grad.data)
+            if grad_norm > max_norm:
+                param.grad.data.mul_(max_norm / (grad_norm + delta))
+
+
+if __name__ == "__main__":
+    for lr in [1e1, 1e2, 1e3]:
+        weights = torch.nn.Parameter(5 * torch.randn((10, 10)))
+        opt = SGDDecay([weights], lr=lr)
+        for t in range(10):
+            opt.zero_grad()  # Reset the gradients for all learnable parameters.
+            loss = (weights**2).mean()  # Compute a scalar loss value.
+            print(loss.cpu().item())
+            loss.backward()  # Run backward pass, which computes gradients.
+            opt.step()  # Run optimizer step.
+            print(f"lr={lr}, t={t}, loss={loss}")
