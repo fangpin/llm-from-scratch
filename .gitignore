@@ -5,3 +5,7 @@ data
 lm/__pycache__
 tests/__pycache__
 output.prof
+.promts
+.vscode
+.vscode
+llm/__pycache__

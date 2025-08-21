@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 import argparse
-from lm.checkpoint import save_checkpoint
+from llm.checkpoint import save_checkpoint
 from .transformer import *
 
 

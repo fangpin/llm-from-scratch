@@ -1,0 +1,7 @@
+Fix: Correct CrossEntropyLoss and gradient_clip
+
+This commit fixes two issues:
+
+1.  The `CrossEntropyLoss` implementation was numerically unstable and produced incorrect results for large inputs. It has been replaced with a version that uses `log_softmax` for better numerical stability.
+
+2.  The `gradient_clip` function was clipping the L2 norm of each parameter's gradient individually, which is incorrect. The implementation has been updated to clip the total L2 norm of all gradients, which is the correct behavior.

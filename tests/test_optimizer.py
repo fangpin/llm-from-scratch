@@ -92,4 +92,5 @@ def test_get_lr_cosine_schedule():
         )
         for it in range(25)
     ]
+    # print(actual_lrs)
     numpy.testing.assert_allclose(numpy.array(actual_lrs), numpy.array(expected_lrs))

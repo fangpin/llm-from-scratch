@@ -184,6 +184,8 @@ def test_rmsnorm(numpy_snapshot, ts_state_dict, in_embeddings):
 
 
 def test_rope(numpy_snapshot, in_embeddings, d_model, theta, n_queries, pos_ids):
+    batch_size = in_embeddings.shape[0]
+    pos_ids = pos_ids.unsqueeze(0).expand(batch_size, -1)
     output = run_rope(
         d_model, theta=theta, max_seq_len=n_queries, in_query_or_key=in_embeddings, token_positions=pos_ids
     )
