@@ -1,6 +1,6 @@
-from typing import List, Tuple
-from transformer import *
-from bpe_tokenizer import *
+from transformer import Transformer, Softmax
+from bpe_tokenizer import BpeTokenizer
+import torch
 
 
 def generate(
@@ -11,7 +11,7 @@ def generate(
     temperature: float,
     top_p: float,
     device: str,
-) -> Tuple[str, List[int]]:
+) -> tuple[str, list[int]]:
     """
     Generates a text completion from a prompt using a trained transformer model.
 
@@ -53,9 +53,7 @@ def generate(
             # Remove tokens with cumulative probability above the threshold
             sorted_indices_to_remove = cumulative_probs > top_p
             # Shift the indices to the right to keep the first token above the threshold
-            sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[
-                ..., :-1
-            ].clone()
+            sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
             sorted_indices_to_remove[..., 0] = 0
 
             indices_to_remove = sorted_indices[sorted_indices_to_remove]
@@ -71,9 +69,7 @@ def generate(
             input_ids = torch.cat([input_ids, next_token], dim=1)
 
             # Check for end-of-text token
-            if (
-                next_token.item() == tokenizer.special_tokens[0]
-            ):  # Assuming the first special token is <|endoftext|>
+            if next_token.item() == tokenizer.special_tokens[0]:  # Assuming the first special token is <|endoftext|>
                 break
 
     # Decode the generated tokens

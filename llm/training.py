@@ -4,6 +4,7 @@ import argparse
 from llm.checkpoint import save_checkpoint
 from llm.transformer import CrossEntropyLoss, Transformer, AdamW, gradient_clip, cos_lr_scheduler
 import os
+from torch.utils.tensorboard.writer import SummaryWriter
 
 
 def get_batch(x: np.ndarray, batch_size: int, context_length: int, device: str) -> tuple[torch.Tensor, torch.Tensor]:
@@ -37,9 +38,9 @@ def train():
     parser.add_argument("--d_model", type=int, default=256, help="Model dimension")
     parser.add_argument("--num_heads", type=int, default=4, help="Number of attention heads")
     parser.add_argument("--d_ff", type=int, default=1024, help="Feed-forward dimension")
-    parser.add_argument("--vocab_size", type=int, default=1000, help="Vocabulary size")
+    parser.add_argument("--vocab_size", type=int, default=10000, help="Vocabulary size")
     parser.add_argument("--num_layers", type=int, default=4, help="Number of transformer layers")
-    parser.add_argument("--max_seq_len", type=int, default=256, help="Maximum sequence length")
+    parser.add_argument("--max_seq_len", type=int, default=128, help="Maximum sequence length")
 
     # Optimizer Hyperparameters
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
@@ -52,9 +53,9 @@ def train():
     # Training Hyperparameters
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
     parser.add_argument("--context_length", type=int, default=128, help="Context length")
-    parser.add_argument("--iterations", type=int, default=5000, help="Number of training iterations")
-    parser.add_argument("--warmup_iters", type=int, default=100, help="Number of warmup iterations")
-    parser.add_argument("--cos_cycle_iters", type=int, default=4000, help="Number of cos cycle iterations")
+    parser.add_argument("--iterations", type=int, default=10000, help="Number of training iterations")
+    parser.add_argument("--warmup_iters", type=int, default=1000, help="Number of warmup iterations")
+    parser.add_argument("--cos_cycle_iters", type=int, default=8000, help="Number of cos cycle iterations")
     parser.add_argument(
         "--device",
         type=str,
@@ -78,8 +79,14 @@ def train():
     parser.add_argument(
         "--checkpoint_path",
         type=str,
-        default="./checkpoints",
+        default="checkpoints",
         help="Path to save checkpoints",
+    )
+    parser.add_argument(
+        "--log_dir",
+        type=str,
+        default="log",
+        help="Path to store log",
     )
     parser.add_argument(
         "--log_interval",
@@ -99,6 +106,9 @@ def train():
 
     # Create checkpoint directory if it doesn't exist
     os.makedirs(args.checkpoint_path, exist_ok=True)
+    os.makedirs(args.log_dir, exist_ok=True)
+
+    writer = SummaryWriter(log_dir=args.log_dir)
 
     # Data Loading
     print("Loading data...")
@@ -155,8 +165,10 @@ def train():
         for param_group in optimizer.param_groups:
             param_group["lr"] = lr
 
+        writer.add_scalar("loss_train", loss.item(), i)
+        writer.add_scalar("lr", lr, i)
         # Logging
-        if i + 1 % args.log_interval == 0:
+        if i % args.log_interval == 0:
             print(f"Iteration {i}, Training Loss: {loss.item():.4f}, LR: {lr:.6f}")
 
         # Validation
