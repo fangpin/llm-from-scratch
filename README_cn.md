@@ -1,77 +1,69 @@
 [English](./README.md)
 
-# 从零开始的 LLM
+# LLM from Scratch
 
-本仓库包含一个从零开始实现的现代仅解码器 Transformer 模型，使用 PyTorch 构建，旨在用于教育目的。它包含了现代语言模型的所有基本构建模块，以清晰、模块化和易于理解的方式编写。该项目旨在为学习大型语言模型如何从头开始构建提供全面的资源。
+This repository contains a from-scratch implementation of a modern decoder-only Transformer model in PyTorch, built for educational purposes. It includes all the essential building blocks of a modern language model, written in a clear, modular, and understandable way. The goal of this project is to provide a comprehensive resource for learning how large language models are built from the ground up.
 
-## 特性
+## Features
 
-* **从零开始实现：** Transformer 模型的每个组件都使用 PyTorch 从零开始实现，从而深入了解底层机制。
-* **现代架构：** 该模型融合了最先进的语言模型中使用的现代技术，包括：
-  * **RMSNorm：** 用于高效稳定的层归一化。
-  * **SwiGLU：** 前馈网络中的激活函数，可提高性能。
-  * **旋转位置嵌入 (RoPE)：** 用于有效的位置编码。
-* **自定义 BPE 分词器：** 从零开始实现的字节对编码 (BPE) 分词器，可在任何文本语料库上进行训练。
-* **自定义优化器：** 包括 `AdamW` 和 `SGDDecay` 优化器的自定义实现。
-* **全面的训练和生成脚本：** 提供用于在大型语料库上训练模型和使用训练好的模型生成文本的脚本。
-* **全面的测试：** 使用 `pytest` 和快照测试的综合测试套件可确保实现的正确性。
+* **From-Scratch Implementation:** Every component of the Transformer model is implemented from scratch using PyTorch, providing a deep understanding of the underlying mechanisms.
+* **Modern Architecture:** The model incorporates modern techniques used in state-of-the-art language models, including:
+  * **RMSNorm:** for efficient and stable layer normalization.
+  * **SwiGLU:** activation function in the feed-forward network for improved performance.
+  * **Rotary Position Embeddings (RoPE):** for effective positional encoding.
+* **Custom BPE Tokenizer:** A from-scratch implementation of the Byte Pair Encoding (BPE) tokenizer, which can be trained on any text corpus.
+* **Custom Optimizers:** Includes custom implementations of `AdamW` and `SGDDecay` optimizers.
+* **Comprehensive Training and Generation Scripts:** Provides scripts for training the model on a large corpus and for generating text with a trained model.
+* **Thorough Testing:** A comprehensive test suite using `pytest` and snapshot testing ensures the correctness of the implementation.
 
-## 已实现的组件
+## Implemented Components
 
-该项目为构建和训练语言模型提供了一个完整的生态系统。关键组件是：
+This project provides a complete ecosystem for building and training a language model. The key components are:
 
-### 核心模型 (`llm/transformer.py`)
+### Core Model (`llm/transformer.py`)
 
-* **`Transformer`**: 组合所有组件的主模型类。
-* **`TransformerBlock`**: Transformer 的单个块，包含多头注意力和前馈网络。
-* **`MultiHeadAttention`**: 多头自注意力机制。
-* **`ScaledDotProductAttention`**: 核心注意力机制。
-* **`FFN`**: 带有 SwiGLU 激活的位置前馈网络。
-* **`RoPE`**: 用于注入位置信息的旋转位置嵌入。
-* **`RmsNorm`**: 均方根层归一化。
-* **`Embedding`**: 令牌嵌入层。
-* **`Linear`**: 自定义线性层。
-* **`Softmax`**: 自定义 softmax 实现。
-* **`CrossEntropyLoss`**: 自定义交叉熵损失函数。
+* **`Transformer`**: The main model class that combines all the components.
+* **`TransformerBlock`**: A single block of the Transformer, containing multi-head attention and a feed-forward network.
+* **`MultiHeadAttention`**: The multi-head self-attention mechanism.
+* **`ScaledDotProductAttention`**: The core attention mechanism.
+* **`FFN`**: The position-wise feed-forward network with SwiGLU activation.
+* **`RoPE`**: Rotary Position Embeddings for injecting positional information.
+* **`RmsNorm`**: Root Mean Square Layer Normalization.
+* **`Embedding`**: The token embedding layer.
+* **`Linear`**: A custom linear layer.
+* **`Softmax`**: A custom softmax implementation.
+* **`CrossEntropyLoss`**: A custom cross-entropy loss function.
 
-### 分词器 (`llm/bpe_tokenizer.py`)
+### Tokenizer (`llm/bpe_tokenizer.py`)
 
-* **`BpeTokenizer`**: 从零开始实现的 BPE 分词器。它可以在语料库上进行训练，以学习词汇表和合并。它还支持特殊令牌。
+* **`BpeTokenizer`**: A from-scratch implementation of the BPE tokenizer. It can be trained on a corpus to learn a vocabulary and merges. It also supports special tokens.
 
-### 訓練和推理
+### Training and Inference
 
-* **`llm/training.py`**: 用于训练 Transformer 模型的脚本。它包括数据加载、训练循环、验证和检查点。
-* **`llm/generating.py`**: 用于使用经过训练的模型通过 top-p 采样生成文本的脚本。
-* **`llm/checkpoint.py`**: 用于保存和加载模型检查点的实用程序。
+* **`llm/training.py`**: A script for training the Transformer model. It includes data loading, a training loop, validation, and checkpointing.
+* **`llm/generating.py`**: A script for generating text using a trained model with top-p sampling.
+* **`llm/checkpoint.py`**: Utilities for saving and loading model checkpoints.
 
-### 优化器和实用程序 (`llm/transformer.py`)
+### Optimizers and Utilities (`llm/transformer.py`)
 
-* **`AdamW`**: AdamW 优化器的自定义实现。
-* **`SGDDecay`**: 带有学习率衰减的 SGD 的自定义实现。
-* **`cos_lr_scheduler`**: 带有预热的余弦学习率调度器。
-* **`gradient_clip`**: 用于梯度裁剪的函数。
+* **`AdamW`**: A custom implementation of the AdamW optimizer.
+* **`SGDDecay`**: A custom implementation of SGD with learning rate decay.
+* **`cos_lr_scheduler`**: A cosine learning rate scheduler with warmup.
+* **`gradient_clip`**: A function for gradient clipping.
 
-## 架构
+## Architecture
 
-本仓库中的 Transformer 模型是一个仅解码器模型，其架构类似于 GPT 等模型。它专为语言建模任务而设计。关键架构特性是：
+The Transformer model in this repository is a decoder-only model, similar to the architecture of models like GPT. It is designed for language modeling tasks. The key architectural features are:
 
-* **预归一化：** 该模型使用 RMSNorm 进行层归一化，该归一化在注意力和前馈层*之前*应用。与后归一化相比，这可以使训练更稳定。
-* **SwiGLU 激活：** 前馈网络使用 SwiGLU (Swish-Gated Linear Unit) 激活函数，该函数已被证明可以提高语言模型的性能。
-* **旋转位置嵌入 (RoPE)：** 该模型使用 RoPE 代替传统的位置嵌入，通过旋转注意力机制中的查询和关键向量来合并位置信息。这是处理长序列的更有效方法。
+* **Pre-Normalization:** The model uses RMSNorm for layer normalization, which is applied *before* the attention and feed-forward layers. This leads to more stable training compared to post-normalization.
+* **SwiGLU Activation:** The feed-forward network uses the SwiGLU (Swish-Gated Linear Unit) activation function, which has been shown to improve performance in language models.
+* **Rotary Position Embedding (RoPE):** Instead of traditional positional embeddings, this model uses RoPE to incorporate positional information by rotating the query and key vectors in the attention mechanism. This is a more effective way to handle long sequences.
 
-## 使用方法
+## Usage
 
-### 1. 训练分词器
+### 1. Preparing the Data
 
-您可以使用 `llm/bpe_tokenizer.py` 脚本在您自己的文本语料库上训练 BPE 分词器。
-
-```bash
-python -m llm.bpe_tokenizer --corpus your_text_file.txt --vocab_size 10000
-```
-
-### 2. 准备数据
-
-训练脚本期望训练和验证数据是令牌 ID 的内存映射 numpy 数组的形式。您可以使用训练好的分词器将文本数据转换为这种格式。
+The training script expects the training and validation data to be in the form of memory-mapped numpy arrays of token IDs. You can use the trained tokenizer to convert your text data into this format.
 
 Downloading data by
 
@@ -90,6 +82,10 @@ gunzip owt_valid.txt.gz
 cd ..
 ```
 
+### 2. Training the Tokenizer
+
+You can train the BPE tokenizer on your own text corpus using the `llm/bpe_tokenizer.py` script.
+
 Preparing token ids for training
 
 ```bash
@@ -97,76 +93,58 @@ Preparing token ids for training
 uv run -m llm.bpe_tokenizer
 ```
 
-### 3. 训练模型
+### 3. Training the Model
 
-`llm/training.py` 脚本用于训练 Transformer 模型。
-
-```bash
-python -m llm.training \
-    --train_data path/to/train_data.bin \
-    --val_data path/to/val_data.bin \
-    --d_model 512 \
-    --num_heads 8 \
-    --d_ff 2048 \
-    --vocab_size 10000 \
-    --num_layers 6 \
-    --max_seq_len 512 \
-    --batch_size 32 \
-    --iterations 10000 \
-    --device cuda:0
-```
-
-### 4. 生成文本
-
-一旦你有了训练好的模型，你就可以使用 `llm/generating.py` 来生成文本。
+The `llm/training.py` script is used to train the Transformer model.
 
 ```bash
-python -m llm.generating \
-    --model_path path/to/your/checkpoint.pt \
-    --tokenizer_path path/to/your/tokenizer.json \
-    --prompt "Hello, world!" \
-    --max_tokens 100 \
-    --temperature 0.8 \
-    --top_p 0.9 \
-    --device cuda:0
+uv run -m llm.training
 ```
 
-## 测试
+### 4. Generating Text
 
-该项目有一个全面的测试套件，以确保实现的正确性。您可以使用 `pytest` 运行测试：
+Once you have a trained model, you can use `llm/generating.py` to generate text.
+
+```bash
+uv run -m llm.generating
+```
+
+## Testing
+
+This project has a comprehensive test suite to ensure the correctness of the implementation. You can run the tests using `pytest`:
 
 ```bash
 uv run pytest
 ```
 
-测试涵盖：
+The tests cover:
 
-* 通过将其输出与参考实现进行比较，来测试 Transformer 模型中每个模块的正确性。
-* BPE 分词器的编码和解码，以及其训练过程。
-* 优化器和其他实用程序。
+* The correctness of each module in the Transformer model by comparing its output with reference implementations.
+* The BPE tokenizer's encoding and decoding, as well as its training process.
+* The optimizers and other utilities.
 
-## 依赖
+## Dependencies
 
 * Python 3.8+
 * PyTorch
 * NumPy
 * einx
 * regex
-* pytest (用于测试)
+* pytest (for testing)
 
-您可以使用 pip 安装依赖项：
+You can install the dependencies using pip:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## 许可证
+## License
 
-本项目采用 MIT 许可证。有关详细信息，请参阅 `LICENSE` 文件。
+This project is licensed under the MIT License. See the `LICENSE` file for details.
 
-## 贡献
+## Contributing
 
-欢迎贡献！如果您有任何建议或发现任何错误，请随时提交拉取请求或提出问题。
+Contributions are welcome! Please feel free to submit a pull request or open an issue if you have any suggestions or find any bugs.
 
 ---
 This README is generated by gemini-cli.
