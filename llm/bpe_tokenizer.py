@@ -10,6 +10,7 @@ class BpeTokenizer:
         self.vcab2id = dict[bytes, int]()
         self.id2vcab = dict[int, bytes]()
         self.merges = list[tuple[bytes, bytes]]()
+        self.merge_ranks = dict[tuple[bytes, bytes], int]()
         self.special_tokens = sorted(
             [s.encode("utf-8", errors) for s in special_tokens] if special_tokens else [], key=len, reverse=True
         )
@@ -25,6 +26,7 @@ class BpeTokenizer:
         if special_tokens:
             self.special_tokens = [s.encode("utf-8", self.errors) for s in special_tokens]
         self.vcab2id = {v: k for k, v in self.id2vcab.items()}
+        self.merge_ranks = {pair: i for i, pair in enumerate(self.merges)}
 
     def _pre_token(self, corpus: bytes) -> list[bytes]:
         if not self.special_tokens:
@@ -59,35 +61,33 @@ class BpeTokenizer:
         for pre_token in pre_tokens:
             if pre_token in self.special_tokens:
                 token_ids.append(self.vcab2id[pre_token])
-            else:
-                tokens = tuple(bytes([c]) for c in pre_token)
-                while True:
-                    pair_cnt = dict[tuple[bytes, bytes], int]()
-                    for pair in zip(tokens[:-1], tokens[1:]):
-                        pair_cnt[pair] = pair_cnt.get(pair, 0) + 1
+                continue
 
-                    if not pair_cnt:
-                        break
+            tokens = tuple(bytes([c]) for c in pre_token)
+            while len(tokens) > 1:
+                pairs = list(zip(tokens[:-1], tokens[1:]))
+                # Find the merge with the lowest rank
+                rank = float("inf")
+                best_pair_idx = -1
+                for i, pair in enumerate(pairs):
+                    if pair in self.merge_ranks and self.merge_ranks[pair] < rank:
+                        rank = self.merge_ranks[pair]
+                        best_pair_idx = i
 
-                    # Find the merge with the lowest rank
-                    best_pair = min(pair_cnt, key=lambda p: self.merges.index(p) if p in self.merges else float("inf"))
+                if best_pair_idx == -1:
+                    break
 
-                    if best_pair not in self.merges:
-                        break
+                # Merge the best pair
+                new_tokens = []
+                if best_pair_idx > 0:
+                    new_tokens.extend(tokens[:best_pair_idx])
+                new_tokens.append(tokens[best_pair_idx] + tokens[best_pair_idx+1])
+                if best_pair_idx + 2 < len(tokens):
+                    new_tokens.extend(tokens[best_pair_idx+2:])
+                tokens = tuple(new_tokens)
 
-                    new_tokens = []
-                    i = 0
-                    while i < len(tokens):
-                        if i < len(tokens) - 1 and tokens[i] == best_pair[0] and tokens[i + 1] == best_pair[1]:
-                            new_tokens.append(best_pair[0] + best_pair[1])
-                            i += 2
-                        else:
-                            new_tokens.append(tokens[i])
-                            i += 1
-                    tokens = tuple(new_tokens)
-
-                for vcab in tokens:
-                    token_ids.append(self.vcab2id[vcab])
+            for vcab in tokens:
+                token_ids.append(self.vcab2id[vcab])
         return token_ids
 
     def encode_iterable(self, iterable: Iterator[str]) -> Iterator[int]:
@@ -173,6 +173,7 @@ class BpeTokenizer:
             word_cnt = new_word_cnt
 
         self.id2vcab = {id: vcab for vcab, id in self.vcab2id.items()}
+        self.merge_ranks = {pair: i for i, pair in enumerate(self.merges)}
         return self.id2vcab, self.merges
 
 
