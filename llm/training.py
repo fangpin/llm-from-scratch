@@ -2,7 +2,8 @@ import torch
 import numpy as np
 import argparse
 from llm.checkpoint import save_checkpoint
-from .transformer import *
+from llm.transformer import CrossEntropyLoss, Transformer, AdamW, gradient_clip, cos_lr_scheduler
+import os
 
 
 def get_batch(x: np.ndarray, batch_size: int, context_length: int, device: str) -> tuple[torch.Tensor, torch.Tensor]:
@@ -33,39 +34,45 @@ def train():
     parser = argparse.ArgumentParser(description="Train a Transformer model.")
 
     # Model Hyperparameters
-    parser.add_argument("--d_model", type=int, default=512, help="Model dimension")
-    parser.add_argument("--num_heads", type=int, default=8, help="Number of attention heads")
-    parser.add_argument("--d_ff", type=int, default=2048, help="Feed-forward dimension")
-    parser.add_argument("--vocab_size", type=int, default=10000, help="Vocabulary size")
-    parser.add_argument("--num_layers", type=int, default=6, help="Number of transformer layers")
-    parser.add_argument("--max_seq_len", type=int, default=512, help="Maximum sequence length")
+    parser.add_argument("--d_model", type=int, default=256, help="Model dimension")
+    parser.add_argument("--num_heads", type=int, default=4, help="Number of attention heads")
+    parser.add_argument("--d_ff", type=int, default=1024, help="Feed-forward dimension")
+    parser.add_argument("--vocab_size", type=int, default=1000, help="Vocabulary size")
+    parser.add_argument("--num_layers", type=int, default=4, help="Number of transformer layers")
+    parser.add_argument("--max_seq_len", type=int, default=256, help="Maximum sequence length")
 
     # Optimizer Hyperparameters
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
+    parser.add_argument("--lr_min", type=float, default=1e-4, help="Min learning rate in cos lr scheduler")
+    parser.add_argument("--lr_max", type=float, default=3e-3, help="Max learning rate in cos lr scheduler")
     parser.add_argument("--beta1", type=float, default=0.9, help="AdamW beta1")
     parser.add_argument("--beta2", type=float, default=0.999, help="AdamW beta2")
     parser.add_argument("--weight_decay", type=float, default=1e-3, help="AdamW weight decay")
 
     # Training Hyperparameters
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
-    parser.add_argument("--context_length", type=int, default=256, help="Context length")
-    parser.add_argument("--iterations", type=int, default=10000, help="Number of training iterations")
+    parser.add_argument("--context_length", type=int, default=128, help="Context length")
+    parser.add_argument("--iterations", type=int, default=5000, help="Number of training iterations")
+    parser.add_argument("--warmup_iters", type=int, default=100, help="Number of warmup iterations")
+    parser.add_argument("--cos_cycle_iters", type=int, default=4000, help="Number of cos cycle iterations")
     parser.add_argument(
         "--device",
         type=str,
-        default="cpu",
+        default="cuda:0",
         help="Device to train on (e.g., 'cpu', 'cuda:0', 'mps')",
     )
     parser.add_argument(
         "--train_data",
         type=str,
-        required=True,
+        default="data/training_data.npy",
+        # required=True,
         help="Path to the training data file (numpy array)",
     )
     parser.add_argument(
         "--val_data",
         type=str,
-        required=True,
+        default="data/validation_data.npy",
+        # required=True,
         help="Path to the validation data file (numpy array)",
     )
     parser.add_argument(
@@ -114,8 +121,7 @@ def train():
     optimizer = AdamW(
         model.parameters(),
         lr=args.lr,
-        beta1=args.beta1,
-        beta2=args.beta2,
+        betas=(args.beta1, args.beta2),
         weight_decay=args.weight_decay,
     )
 
@@ -124,7 +130,7 @@ def train():
 
     # Training Loop
     print("Starting training...")
-    for i in range(args.iterations):
+    for i in range(args.iterations + 1):
         # Get a batch of training data
         inputs, targets = get_batch(train_data, args.batch_size, args.context_length, args.device)
 
@@ -139,12 +145,18 @@ def train():
         optimizer.step()
 
         # Learning rate decay
-        lr = cos_lr_scheduler(1000, args.iterations, i, args.lr, 1e-5)
+        lr = cos_lr_scheduler(
+            it=i,
+            warmup_iters=args.warmup_iters,
+            cos_cycle_iters=args.cos_cycle_iters,
+            lr_min=args.lr_min,
+            lr_max=args.lr_max,
+        )
         for param_group in optimizer.param_groups:
             param_group["lr"] = lr
 
         # Logging
-        if i % args.log_interval == 0:
+        if i + 1 % args.log_interval == 0:
             print(f"Iteration {i}, Training Loss: {loss.item():.4f}, LR: {lr:.6f}")
 
         # Validation
@@ -162,40 +174,9 @@ def train():
 
         # Checkpointing
         if i % args.checkpoint_interval == 0 and i > 0:
-            checkpoint = {
-                "model": model.state_dict(),
-                "optimizer": optimizer.state_dict(),
-                "iteration": i,
-            }
             save_checkpoint(model, optimizer, i, os.path.join(args.checkpoint_path, f"chpt_{i}.pt"))
             print(f"Saved checkpoint at iteration {i}")
 
 
 if __name__ == "__main__":
-    # Create a dummy data file
-    dummy_data = np.arange(1000, dtype=np.int64)
-    dummy_data_path = "dummy_data.bin"
-    dummy_data.tofile(dummy_data_path)
-
-    # Load the data using memory mapping
-    # The dtype must match the data type used to save the file
-    memmapped_data = np.memmap(dummy_data_path, dtype=np.int64, mode="r")
-
-    # Define parameters
-    batch_size = 4
-    context_length = 10
-    device = "cpu"
-
-    # Get a batch from the memory-mapped data
-    inputs, targets = get_batch(memmapped_data, batch_size, context_length, device)
-
-    print("Successfully sampled a batch from the memory-mapped file.")
-    print("Input shape:", inputs.shape)
-    print("Target shape:", targets.shape)
-
-    # Clean up the dummy file
-    import os
-
-    os.remove(dummy_data_path)
-
     train()

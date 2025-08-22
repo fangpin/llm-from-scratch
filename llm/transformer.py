@@ -5,7 +5,6 @@ from typing import Optional, overload, Union, TypeAlias, Dict, Tuple, Any
 from collections.abc import Callable, Iterable
 from torch import Tensor
 from jaxtyping import Float
-import einops
 
 
 ParamsT: TypeAlias = Union[Iterable[torch.Tensor], Iterable[Dict[str, Any]], Iterable[Tuple[str, torch.Tensor]]]
@@ -118,10 +117,11 @@ class RoPE(torch.nn.Module):
         x_rotated = torch.stack((-x_reshaped[..., 1], x_reshaped[..., 0]), dim=-1)  # rotate: (a,b) -> (-b,a)
         x_rotated = x_rotated.view(*x.shape)  # (..., seq_len, dim)
 
-        cos = cos.view((1,) * (x.ndim - cos.ndim) + cos.shape)
-        sin = sin.view((1,) * (x.ndim - cos.ndim) + cos.shape)
+        if x.ndim == 4:
+            cos = cos.unsqueeze(1)
+            sin = sin.unsqueeze(1)
 
-        print(f"x shape {x.shape}, cos shape {cos.shape}")
+        # print(f"x shape {x.shape}, cos shape {cos.shape}")
         x_rot = x * cos + x_rotated * sin
         return x_rot
 

@@ -174,3 +174,27 @@ class BpeTokenizer:
 
         self.id2vcab = {id: vcab for vcab, id in self.vcab2id.items()}
         return self.id2vcab, self.merges
+
+
+if __name__ == "__main__":
+    # train_data_file = os.path.join("data", "TinyStoriesV2-GPT4-train.txt")
+    import numpy as np
+
+    for rf, wf in zip(
+        ["TinyStoriesV2-GPT4-valid.txt", "TinyStoriesV2-GPT4-train.txt"], ["validation_data.npy", "training_data.npy"]
+    ):
+        train_text_file = os.path.join("data", rf)
+        vocab_size = 10000
+
+        train_token_file = os.path.join("data", wf)
+
+        tokenizer = BpeTokenizer(special_tokens=["<|endoftext|>"])
+        print("start traning")
+        tokenizer.train(train_text_file, vocab_size=vocab_size, special_tokens=["<|endoftext|>"])
+        print("end traning")
+
+        with open(train_text_file) as f:
+            print("starting encoding text to token ids")
+            token_ids = tokenizer.encode(f.read())
+            print("start persisting tokens ids")
+            np.save(train_token_file, np.array(token_ids))
