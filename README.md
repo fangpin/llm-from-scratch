@@ -61,15 +61,7 @@ The Transformer model in this repository is a decoder-only model, similar to the
 
 ## Usage
 
-### 1. Training the Tokenizer
-
-You can train the BPE tokenizer on your own text corpus using the `llm/bpe_tokenizer.py` script.
-
-```bash
-python -m llm.bpe_tokenizer --corpus your_text_file.txt --vocab_size 10000
-```
-
-### 2. Preparing the Data
+### 1. Preparing the Data
 
 The training script expects the training and validation data to be in the form of memory-mapped numpy arrays of token IDs. You can use the trained tokenizer to convert your text data into this format.
 
@@ -90,6 +82,10 @@ gunzip owt_valid.txt.gz
 cd ..
 ```
 
+### 2. Training the Tokenizer
+
+You can train the BPE tokenizer on your own text corpus using the `llm/bpe_tokenizer.py` script.
+
 Preparing token ids for training
 
 ```bash
@@ -102,18 +98,7 @@ uv run -m llm.bpe_tokenizer
 The `llm/training.py` script is used to train the Transformer model.
 
 ```bash
-python -m llm.training \
-    --train_data path/to/train_data.bin \
-    --val_data path/to/val_data.bin \
-    --d_model 512 \
-    --num_heads 8 \
-    --d_ff 2048 \
-    --vocab_size 10000 \
-    --num_layers 6 \
-    --max_seq_len 512 \
-    --batch_size 32 \
-    --iterations 10000 \
-    --device cuda:0
+uv run -m llm.training
 ```
 
 ### 4. Generating Text
@@ -121,14 +106,7 @@ python -m llm.training \
 Once you have a trained model, you can use `llm/generating.py` to generate text.
 
 ```bash
-python -m llm.generating \
-    --model_path path/to/your/checkpoint.pt \
-    --tokenizer_path path/to/your/tokenizer.json \
-    --prompt "Hello, world!" \
-    --max_tokens 100 \
-    --temperature 0.8 \
-    --top_p 0.9 \
-    --device cuda:0
+uv run -m llm.generating
 ```
 
 ## Testing
@@ -144,21 +122,6 @@ The tests cover:
 * The correctness of each module in the Transformer model by comparing its output with reference implementations.
 * The BPE tokenizer's encoding and decoding, as well as its training process.
 * The optimizers and other utilities.
-
-## Dependencies
-
-* Python 3.8+
-* PyTorch
-* NumPy
-* einx
-* regex
-* pytest (for testing)
-
-You can install the dependencies using pip:
-
-```bash
-pip install -r requirements.txt
-```
 
 ## License
 
