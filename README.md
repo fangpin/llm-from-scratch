@@ -86,7 +86,7 @@ cd ..
 
 You can train the BPE tokenizer on your own text corpus using the `llm/bpe_tokenizer.py` script.
 
-Preparing token ids for training
+Preparing token ids for training. If you have multiple files as training corpus, just simply merge these files by a special token "<|endoftext|>"
 
 ```bash
 
@@ -122,6 +122,18 @@ The tests cover:
 * The correctness of each module in the Transformer model by comparing its output with reference implementations.
 * The BPE tokenizer's encoding and decoding, as well as its training process.
 * The optimizers and other utilities.
+
+## Training
+
+### Loss Curve
+
+![Loss Curve](img/loss.png)
+
+### Learning Rate Schedule
+
+![Learning Rate Schedule](img/lr.png)
+
+## Example Output
 
 ## License
 

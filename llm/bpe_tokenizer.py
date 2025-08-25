@@ -1,6 +1,9 @@
 from collections.abc import Iterator
 import regex as re
 import os
+import pickle
+
+from llm.args import get_parser
 
 
 class BpeTokenizer:
@@ -19,12 +22,19 @@ class BpeTokenizer:
         self,
         id2vcab: dict[int, bytes],
         merges: list[tuple[bytes, bytes]],
-        special_tokens: list[str] | None = None,
+        special_tokens: list[str] | list[bytes] | None = None,
     ):
         self.id2vcab = id2vcab
         self.merges = merges
         if special_tokens:
-            self.special_tokens = [s.encode("utf-8", self.errors) for s in special_tokens]
+
+            def is_list_of_str(lst):
+                return isinstance(lst, list) and all(isinstance(item, str) for item in lst)
+
+            if is_list_of_str(special_tokens):
+                self.special_tokens = [s.encode("utf-8", self.errors) for s in special_tokens]
+            else:
+                self.special_tokens = special_tokens
         self.vcab2id = {v: k for k, v in self.id2vcab.items()}
         self.merge_ranks = {pair: i for i, pair in enumerate(self.merges)}
 
@@ -81,9 +91,9 @@ class BpeTokenizer:
                 new_tokens = []
                 if best_pair_idx > 0:
                     new_tokens.extend(tokens[:best_pair_idx])
-                new_tokens.append(tokens[best_pair_idx] + tokens[best_pair_idx+1])
+                new_tokens.append(tokens[best_pair_idx] + tokens[best_pair_idx + 1])
                 if best_pair_idx + 2 < len(tokens):
-                    new_tokens.extend(tokens[best_pair_idx+2:])
+                    new_tokens.extend(tokens[best_pair_idx + 2 :])
                 tokens = tuple(new_tokens)
 
             for vcab in tokens:
@@ -98,6 +108,19 @@ class BpeTokenizer:
         vcabs = [self.id2vcab.get(i, b"\xef\xbf\xbd") for i in token_ids]
         bs = b"".join(vcabs)
         return bs.decode("utf-8", self.errors)
+
+    def save(self, out: str) -> None:
+        obj = {"merge": self.merges, "id2vcab": self.id2vcab, "special_tokens": self.special_tokens}
+        with open(out, "wb") as f:
+            pickle.dump(obj, f)
+
+    def load(self, ins: str):
+        with open(ins, "rb") as f:
+            obj = pickle.load(f)
+            merges = obj["merge"]
+            id2vcab = obj["id2vcab"]
+            special_tokens = obj["special_tokens"]
+        self.from_pretrained(id2vcab=id2vcab, merges=merges, special_tokens=special_tokens)
 
     def train(self, input_path: str | os.PathLike, vocab_size: int, special_tokens: list[str]):
         """
@@ -143,6 +166,7 @@ class BpeTokenizer:
                     del pair_cnt[pair]
 
         while len(self.vcab2id) < vocab_size:
+            print(f"vocab_size = {len(self.vcab2id)}, target {vocab_size}")
             best_pair = max(pair_cnt.keys(), key=lambda p: (pair_cnt.get(p, 0), p))
             self.vcab2id[best_pair[0] + best_pair[1]] = len(self.vcab2id)
             self.merges.append(best_pair)
@@ -181,21 +205,23 @@ if __name__ == "__main__":
     # train_data_file = os.path.join("data", "TinyStoriesV2-GPT4-train.txt")
     import numpy as np
 
-    for rf, wf in zip(
-        ["TinyStoriesV2-GPT4-valid.txt", "TinyStoriesV2-GPT4-train.txt"], ["validation_data.npy", "training_data.npy"]
-    ):
-        train_text_file = os.path.join("data", rf)
-        vocab_size = 10000
+    parser = get_parser()
+    args = parser.parse_args()
+    vocab_size = args.vocab_size
+    tokenizer = BpeTokenizer(special_tokens=["<|endoftext|>"])
+    print("start traning")
+    tokenizer.train(args.train_source_file, vocab_size=vocab_size, special_tokens=["<|endoftext|>"])
+    print("end traning")
+    tokenizer.save(args.tokenizer_checpoint)
 
-        train_token_file = os.path.join("data", wf)
+    with open(args.train_source_file) as f:
+        print("starting encoding train text to token ids")
+        token_ids = tokenizer.encode(f.read())
+        print("start persisting train tokens ids")
+        np.save(args.train_data, np.array(token_ids))
 
-        tokenizer = BpeTokenizer(special_tokens=["<|endoftext|>"])
-        print("start traning")
-        tokenizer.train(train_text_file, vocab_size=vocab_size, special_tokens=["<|endoftext|>"])
-        print("end traning")
-
-        with open(train_text_file) as f:
-            print("starting encoding text to token ids")
-            token_ids = tokenizer.encode(f.read())
-            print("start persisting tokens ids")
-            np.save(train_token_file, np.array(token_ids))
+    with open(args.valid_source_file) as f:
+        print("starting encoding valid text to token ids")
+        token_ids = tokenizer.encode(f.read())
+        print("start persisting valid tokens ids")
+        np.save(args.val_data, np.array(token_ids))
