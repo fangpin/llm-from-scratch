@@ -77,12 +77,14 @@ def generate(prompt: str) -> tuple[str, list[int]]:
                 break
 
     # Decode the generated tokens
-    generated_ids = input_ids[0].tolist()
+    prompt_len = len(tokenizer.encode(prompt))
+    generated_ids = input_ids[0, prompt_len:].tolist()
     return tokenizer.decode(generated_ids), generated_ids
 
 
 if __name__ == "__main__":
-    prompt = "tell you"
+    prompt = "tell you a story, "
+    print(f"Prompt: {prompt}")
     output, output_token_ids = generate(prompt)
-    print(output)
+    print(f"Completion: {output}")
     print(output_token_ids)

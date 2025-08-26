@@ -75,17 +75,3 @@ if __name__ == "__main__":
     parser.add_argument("--forward_only", type=bool, default=False, help="only benchmark forward pass, default=false")
     parser.add_argument("--device", type=str, default="cuda:0", help="device")
 
-    args = parser.parse_args()
-    benchmark(
-        d_model=args.d_model,
-        num_heads=args.num_heads,
-        d_ff=args.d_ff,
-        vocab_size=args.vocab_size,
-        num_layers=args.num_layers,
-        batch_size=args.batch_size,
-        seq_len=args.seq_len,
-        warmup_steps=args.warmup_steps,
-        forward_only=args.forward_only,
-        device=args.device,
-        dtype=torch.float32,
-    )

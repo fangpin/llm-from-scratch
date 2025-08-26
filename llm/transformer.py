@@ -49,7 +49,7 @@ class RmsNorm(torch.nn.Module):
         x = x.to(torch.float32)
         rms = einx.mean("... [c] -> ... 1", x**2)
         x_norm = x / torch.sqrt(rms + self.eps)
-        ret = x_norm * self.g
+        ret = x_norm * self.g.to(x_norm.dtype)
         return ret.to(in_dtype)
 
 
