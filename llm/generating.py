@@ -34,15 +34,20 @@ def generate(prompt: str) -> tuple[str, list[int]]:
     with torch.no_grad():
         for _ in range(args.max_seq_len):
             # Get the last context_length tokens
-            input_ids_cond = input_ids[:, -model.max_seq_len :]
+            current_len = input_ids.shape[1]
+            start_idx = max(0, current_len - model.max_seq_len)
+            input_ids_cond = input_ids[:, start_idx:]
+
+            # The positions should be absolute, tracking the full sequence length
+            token_positions = torch.arange(start_idx, current_len, device=args.device).unsqueeze(0)
 
             # Get the logits from the model
-            logits = model(input_ids_cond, train=False)
+            logits = model(input_ids_cond, token_positions)
             # Take the logits for the last token
             logits = logits[:, -1, :]
 
             # Apply temperature scaling
-            logits = logits / args.temprature
+            logits = logits / args.temperature
 
             # Apply top-p sampling
             probs = Softmax()(logits)
@@ -68,7 +73,7 @@ def generate(prompt: str) -> tuple[str, list[int]]:
             input_ids = torch.cat([input_ids, next_token], dim=1)
 
             # Check for end-of-text token
-            if next_token.item() == 0:  # Assuming the first special token is <|endoftext|>
+            if next_token.item() == tokenizer.vcab2id[tokenizer.special_tokens[0]]:
                 break
 
     # Decode the generated tokens

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
-from typing import IO, Any, BinaryIO
+from typing import IO, Any, BinaryIO, Type
 from collections.abc import Iterable
 from einx import op
 from jaxtyping import Float, Int
@@ -148,7 +148,7 @@ def run_multihead_self_attention(
     project_weight = torch.cat([q_proj_weight, k_proj_weight, v_proj_weight], dim=0)
     att.project.w.data = project_weight
     att.out_linear.w.data = o_proj_weight
-    return att(in_features, train=True)
+    return att(in_features)
 
 
 def run_multihead_self_attention_with_rope(
@@ -172,7 +172,7 @@ def run_multihead_self_attention_with_rope(
     mha.project.w.data = combined_qkv_weight
     mha.out_linear.w.data = o_proj_weight
 
-    return mha(in_features, train=True, token_positions=token_positions)
+    return mha(in_features, token_positions=token_positions)
 
 
 def run_rope(
@@ -285,7 +285,7 @@ def run_transformer_block(
     ts.rms_norm1.g.data = ln1_weight
     ts.rms_norm2.g.data = ln2_weight
 
-    return ts(in_features, train=True)
+    return ts(in_features)
 
 
 def run_transformer_lm(
@@ -412,7 +412,7 @@ def run_transformer_lm(
         ts.blocks[layer].rms_norm1.g.data = ln1_weight
         ts.blocks[layer].rms_norm2.g.data = ln2_weight
 
-    return ts(token_ids=in_indices, train=True)
+    return ts(token_ids=in_indices)
 
 
 def run_rmsnorm(
@@ -669,3 +669,136 @@ def run_train_bpe(
     """
     tokenizer = BpeTokenizer()
     return tokenizer.train(input_path, vocab_size=vocab_size, special_tokens=special_tokens)
+
+
+def get_flashattention_autograd_function_pytorch() -> Type:
+    """
+    Returns a torch.autograd.Function subclass that implements FlashAttention2.
+    The expectation is that this class will implement FlashAttention2
+    using only standard PyTorch operations (no Triton!).
+
+    Returns:
+        A class object (not an instance of the class)
+    """
+    # For example: return MyFlashAttnAutogradFunctionClass
+    raise NotImplementedError
+
+
+def get_flashattention_autograd_function_triton() -> Type:
+    """
+    Returns a torch.autograd.Function subclass that implements FlashAttention2
+    using Triton kernels.
+    The expectation is that this class will implement the same operations
+    as the class you return in get_flashattention_autograd_function_pytorch(),
+    but it should do so by invoking custom Triton kernels in the forward
+    and backward passes.
+
+    Returns:
+        A class object (not an instance of the class)
+    """
+    # For example: return MyTritonFlashAttentionAutogradFunctionClass
+    raise NotImplementedError
+
+
+def get_ddp_individual_parameters(module: torch.nn.Module) -> torch.nn.Module:
+    """
+    Returns a torch.nn.Module container that handles
+    parameter broadcasting and gradient synchronization for
+    distributed data parallel training.
+
+    This container should overlaps communication with backprop computation
+    by asynchronously communicating gradients as they are ready
+    in the backward pass. The gradient for each parameter tensor
+    is individually communicated.
+
+    Args:
+        module: torch.nn.Module
+            Underlying model to wrap with DDP.
+    Returns:
+        Instance of a DDP class.
+    """
+    # For example: return DDPIndividualParameters(module)
+    raise NotImplementedError
+
+
+def ddp_individual_parameters_on_after_backward(ddp_model: torch.nn.Module, optimizer: torch.optim.Optimizer):
+    """
+    Code to run after the backward pass is completed, but before we take
+    an optimizer step.
+
+    Args:
+        ddp_model: torch.nn.Module
+            DDP-wrapped model.
+        optimizer: torch.optim.Optimizer
+            Optimizer being used with the DDP-wrapped model.
+    """
+    # For example: ddp_model.finish_gradient_synchronization()
+    raise NotImplementedError
+
+
+def get_ddp_bucketed(module: torch.nn.Module, bucket_size_mb: float) -> torch.nn.Module:
+    """
+    Returns a torch.nn.Module container that handles
+    parameter broadcasting and gradient synchronization for
+    distributed data parallel training.
+
+    This container should overlaps communication with backprop computation
+    by asynchronously communicating buckets of gradients as they are ready
+    in the backward pass.
+
+    Args:
+        module: torch.nn.Module
+            Underlying model to wrap with DDP.
+        bucket_size_mb: The bucket size, in megabytes. If None, use a single
+            bucket of unbounded size.
+    Returns:
+        Instance of a DDP class.
+    """
+    raise NotImplementedError
+
+
+def ddp_bucketed_on_after_backward(ddp_model: torch.nn.Module, optimizer: torch.optim.Optimizer):
+    """
+    Code to run after the backward pass is completed, but before we take
+    an optimizer step.
+
+    Args:
+        ddp_model: torch.nn.Module
+            DDP-wrapped model.
+        optimizer: torch.optim.Optimizer
+            Optimizer being used with the DDP-wrapped model.
+    """
+    # For example: ddp_model.finish_gradient_synchronization()
+    raise NotImplementedError
+
+
+def ddp_bucketed_on_train_batch_start(ddp_model: torch.nn.Module, optimizer: torch.optim.Optimizer):
+    """
+    Code to run at the very start of the training step.
+
+    Args:
+        ddp_model: torch.nn.Module
+            DDP-wrapped model.
+        optimizer: torch.optim.Optimizer
+            Optimizer being used with the DDP-wrapped model.
+    """
+    raise NotImplementedError
+
+
+def get_sharded_optimizer(params, optimizer_cls: Type[torch.optim.Optimizer], **kwargs) -> torch.optim.Optimizer:
+    """
+    Returns a torch.optim.Optimizer that handles optimizer state sharding
+    of the given optimizer_cls on the provided parameters.
+
+    Arguments:
+        params (``Iterable``): an ``Iterable`` of :class:`torch.Tensor` s
+            or :class:`dict` s giving all parameters, which will be sharded
+            across ranks.
+        optimizer_class (:class:`torch.nn.Optimizer`): the class of the local
+            optimizer.
+    Keyword arguments:
+        kwargs: keyword arguments to be forwarded to the optimizer constructor.
+    Returns:
+        Instance of sharded optimizer.
+    """
+    raise NotImplementedError

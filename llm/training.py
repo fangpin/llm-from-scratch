@@ -8,9 +8,11 @@ import os
 from torch.utils.tensorboard.writer import SummaryWriter
 
 
-def get_batch(x: np.ndarray, batch_size: int, context_length: int, device: str) -> tuple[torch.Tensor, torch.Tensor]:
+def get_batch(
+    x: np.ndarray, batch_size: int, context_length: int, device: str
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
-    Generates a batch of input and target sequences from the tokenized data.
+    Generates a batch of input, target, and position sequences from the tokenized data.
 
     Args:
         x: A numpy array of token IDs.
@@ -19,7 +21,7 @@ def get_batch(x: np.ndarray, batch_size: int, context_length: int, device: str) 
         device: The PyTorch device to place the tensors on (e.g., 'cpu', 'cuda:0').
 
     Returns:
-        A tuple containing the input sequences and target sequences as PyTorch tensors.
+        A tuple containing the input sequences, target sequences, and position sequences as PyTorch tensors.
     """
     # Generate random starting indices for the batches
     ix = torch.randint(0, len(x) - context_length, (batch_size,))
@@ -27,9 +29,10 @@ def get_batch(x: np.ndarray, batch_size: int, context_length: int, device: str) 
     # Create the input and target sequences
     input_seqs = torch.stack([torch.from_numpy(x[i : i + context_length].astype(np.int64)) for i in ix])
     target_seqs = torch.stack([torch.from_numpy(x[i + 1 : i + 1 + context_length].astype(np.int64)) for i in ix])
+    positions = torch.stack([torch.arange(i, i + context_length) for i in ix])
 
     # Move the tensors to the specified device
-    return input_seqs.to(device), target_seqs.to(device)
+    return input_seqs.to(device), target_seqs.to(device), positions.to(device)
 
 
 def train():
@@ -76,10 +79,10 @@ def train():
     print("Starting training...")
     for i in range(args.iterations + 1):
         # Get a batch of training data
-        inputs, targets = get_batch(train_data, args.batch_size, args.context_length, args.device)
+        inputs, targets, positions = get_batch(train_data, args.batch_size, args.context_length, args.device)
 
         # Forward pass
-        logits = model(inputs, train=True)
+        logits = model(inputs, positions)
         loss = criterion(logits, targets)
 
         # Backward pass and optimization
@@ -111,12 +114,15 @@ def train():
             val_loss = 0
             with torch.no_grad():
                 for _ in range(100):  # 100 batches for validation
-                    val_inputs, val_targets = get_batch(val_data, args.batch_size, args.context_length, args.device)
-                    val_logits = model(val_inputs, train=False)
+                    val_inputs, val_targets, val_positions = get_batch(
+                        val_data, args.batch_size, args.context_length, args.device
+                    )
+                    val_logits = model(val_inputs, val_positions)
                     val_loss += criterion(val_logits, val_targets).item()
             val_loss /= 100
             print(f"Iteration {i}, Validation Loss: {val_loss:.4f}")
             model.train()
+            writer.add_scalar("val_loss", val_loss, i)
 
         # Checkpointing
         if i % args.checkpoint_interval == 0 and i > 0:

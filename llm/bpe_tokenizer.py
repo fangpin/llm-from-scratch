@@ -212,7 +212,7 @@ if __name__ == "__main__":
     print("start traning")
     tokenizer.train(args.train_source_file, vocab_size=vocab_size, special_tokens=["<|endoftext|>"])
     print("end traning")
-    tokenizer.save(args.tokenizer_checpoint)
+    tokenizer.save(args.tokenizer_checkpoint)
 
     with open(args.train_source_file) as f:
         print("starting encoding train text to token ids")

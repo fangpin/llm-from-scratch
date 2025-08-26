@@ -330,3 +330,16 @@ def pos_ids(n_queries):
 
 # def test_state_dict(ts_state_dict):
 #     print(ts_state_dict)
+
+
+def pytest_addoption(parser):
+    parser.addoption("--snapshot-exact", action="store_true", help="Use exact matching standards for snapshot matching")
+
+
+_A = TypeVar("_A", np.ndarray, Tensor)
+
+
+def _canonicalize_array(arr: _A) -> np.ndarray:
+    if isinstance(arr, Tensor):
+        arr = arr.detach().cpu().numpy()
+    return arr

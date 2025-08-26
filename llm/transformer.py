@@ -1,13 +1,13 @@
 import torch
 import math
 import einx
-from typing import Optional, overload, Union, TypeAlias, Dict, Tuple, Any
+from typing import overload, TypeAlias, Any
 from collections.abc import Callable, Iterable
 from torch import Tensor
 from jaxtyping import Float
 
 
-ParamsT: TypeAlias = Union[Iterable[torch.Tensor], Iterable[Dict[str, Any]], Iterable[Tuple[str, torch.Tensor]]]
+ParamsT: TypeAlias = Iterable[torch.Tensor] | Iterable[dict[str, Any]] | Iterable[tuple[str, torch.Tensor]]
 
 
 class Linear(torch.nn.Module):
@@ -181,13 +181,10 @@ class MultiHeadAttention(torch.nn.Module):
         causal_mask = torch.triu(torch.ones(max_seq_len, max_seq_len, dtype=torch.bool), diagonal=1)
         self.register_buffer("causal_mask", causal_mask)
 
-    def forward(self, x: Float[Tensor, "b s d"], train: bool) -> torch.Tensor:
+    def forward(self, x: Float[Tensor, "b s d"]) -> torch.Tensor:
         seq_len = x.shape[1]
 
-        if not train:
-            mask = None
-        else:
-            mask = self.causal_mask[:seq_len, :seq_len]
+        mask = self.causal_mask[:seq_len, :seq_len]
 
         qkv = self.project(x)
         q, k, v = einx.rearrange("b s (n h d) -> n b h s d", qkv, n=3, h=self.num_head)
@@ -202,17 +199,14 @@ class MultiHeadAttentionWithRoPE(MultiHeadAttention):
         super().__init__(d_model=d_model, num_head=num_head, max_seq_len=max_seq_len, device=device, dtype=dtype)
         self.rope = RoPE(d_model // num_head, max_seq_len=max_seq_len, theta=theta, device=device, dtype=dtype)
 
-    def forward(self, x: torch.Tensor, train: bool, token_positions: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, token_positions: torch.Tensor | None = None) -> torch.Tensor:
         seq_len = x.shape[1]
         batch_size = x.shape[0]
 
         if token_positions is None:
             token_positions = torch.arange(seq_len, device=x.device).unsqueeze(0).expand(batch_size, -1)
 
-        if not train:
-            mask = None
-        else:
-            mask = self.causal_mask[:seq_len, :seq_len]
+        mask = self.causal_mask[:seq_len, :seq_len]
 
         qkv = self.project(x)
         q, k, v = einx.rearrange("b s (n h d) -> n b h s d", qkv, n=3, h=self.num_head)
@@ -245,9 +239,9 @@ class TransformerBlock(torch.nn.Module):
         )
         self.ffe = FFN(d_model, d_ff, d_model, device=device, dtype=dtype)
 
-    def forward(self, x: torch.Tensor, train: bool, token_positions: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, token_positions: torch.Tensor | None = None) -> torch.Tensor:
         x_norm = self.rms_norm1(x)
-        x_atten = self.mult_head_atten(x_norm, train, token_positions)
+        x_atten = self.mult_head_atten(x_norm, token_positions)
         x = x + x_atten
         x_norm = self.rms_norm2(x)
         x_ffe = self.ffe(x_norm)
@@ -287,12 +281,10 @@ class Transformer(torch.nn.Module):
         self.out_linear = Linear(d_model, vocab_size, device=device, dtype=dtype)
         self.max_seq_len = max_seq_len
 
-    def forward(
-        self, token_ids: torch.Tensor, train: bool, token_positions: torch.Tensor | None = None
-    ) -> torch.Tensor:
+    def forward(self, token_ids: torch.Tensor, token_positions: torch.Tensor | None = None) -> torch.Tensor:
         x = self.embedding(token_ids)
         for block in self.blocks:
-            x = block(x, train, token_positions)
+            x = block(x, token_positions)
         x_norm = self.norm(x)
         logits = self.out_linear(x_norm)
         return logits
@@ -331,7 +323,7 @@ class SGDDecay(torch.optim.Optimizer):
     @overload
     def step(self, closure: Callable[[], float]) -> float: ...
 
-    def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]:
+    def step(self, closure: Callable[[], float] | None = None) -> float | None:
         loss = None if closure is None else closure()
         for group in self.param_groups:
             lr = group["lr"]
