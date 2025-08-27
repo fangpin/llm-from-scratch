@@ -122,7 +122,7 @@ class BpeTokenizer:
             special_tokens = obj["special_tokens"]
         self.from_pretrained(id2vcab=id2vcab, merges=merges, special_tokens=special_tokens)
 
-    def train(self, input_path: str | os.PathLike, vocab_size: int, special_tokens: list[str]):
+    def train(self, input_path: str | os.PathLike, vocab_size: int, special_tokens: list[str], verbose=False):
         """
         Train the BPE tokenizer on the given corpus.
 
@@ -166,7 +166,8 @@ class BpeTokenizer:
                     del pair_cnt[pair]
 
         while len(self.vcab2id) < vocab_size:
-            print(f"vocab_size = {len(self.vcab2id)}, target {vocab_size}")
+            if verbose:
+                print(f"vocab_size = {len(self.vcab2id)}, target {vocab_size}")
             best_pair = max(pair_cnt.keys(), key=lambda p: (pair_cnt.get(p, 0), p))
             self.vcab2id[best_pair[0] + best_pair[1]] = len(self.vcab2id)
             self.merges.append(best_pair)
@@ -210,7 +211,7 @@ if __name__ == "__main__":
     vocab_size = args.vocab_size
     tokenizer = BpeTokenizer(special_tokens=["<|endoftext|>"])
     print("start traning")
-    tokenizer.train(args.train_source_file, vocab_size=vocab_size, special_tokens=["<|endoftext|>"])
+    tokenizer.train(args.train_source_file, vocab_size=vocab_size, special_tokens=["<|endoftext|>"], verbose=True)
     print("end traning")
     tokenizer.save(args.tokenizer_checkpoint)
 

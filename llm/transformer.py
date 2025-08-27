@@ -44,13 +44,11 @@ class RmsNorm(torch.nn.Module):
         self.g = torch.nn.Parameter(torch.ones(d_model, device=device, dtype=dtype))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        assert x.shape[-1] == self.d_model
-        in_dtype = x.dtype
+        input_dtype = x.dtype
         x = x.to(torch.float32)
-        rms = einx.mean("... [c] -> ... 1", x**2)
-        x_norm = x / torch.sqrt(rms + self.eps)
-        ret = x_norm * self.g.to(x_norm.dtype)
-        return ret.to(in_dtype)
+        variance = x.pow(2).mean(-1, keepdim=True)
+        x = x * torch.rsqrt(variance + self.eps)
+        return (self.g * x).to(input_dtype)
 
 
 class SiLu(torch.nn.Module):

@@ -34,17 +34,16 @@ def generate(prompt: str) -> tuple[str, list[int]]:
     with torch.no_grad():
         for _ in range(args.max_seq_len):
             # Get the last context_length tokens
-            current_len = input_ids.shape[1]
-            start_idx = max(0, current_len - model.max_seq_len)
-            input_ids_cond = input_ids[:, start_idx:]
+            input_ids_cond = input_ids[:, -model.max_seq_len :]
 
-            # The positions should be absolute, tracking the full sequence length
-            token_positions = torch.arange(start_idx, current_len, device=args.device).unsqueeze(0)
+            # The positions should be relative to the current context window
+            token_positions = torch.arange(input_ids_cond.shape[1], device=args.device).unsqueeze(0)
 
             # Get the logits from the model
             logits = model(input_ids_cond, token_positions)
             # Take the logits for the last token
             logits = logits[:, -1, :]
+            print(logits)
 
             # Apply temperature scaling
             logits = logits / args.temperature
@@ -83,7 +82,7 @@ def generate(prompt: str) -> tuple[str, list[int]]:
 
 
 if __name__ == "__main__":
-    prompt = "tell you a story, "
+    prompt = "tell you a story"
     print(f"Prompt: {prompt}")
     output, output_token_ids = generate(prompt)
     print(f"Completion: {output}")
