@@ -10,7 +10,7 @@ def get_parser():
     parser.add_argument("--d_ff", type=int, default=1024, help="Feed-forward dimension")
     parser.add_argument("--vocab_size", type=int, default=2048, help="Vocabulary size")
     parser.add_argument("--num_layers", type=int, default=6, help="Number of transformer layers")
-    parser.add_argument("--max_seq_len", type=int, default=256, help="Maximum sequence length")
+    parser.add_argument("--max_seq_len", type=int, default=64, help="Maximum sequence length")
 
     # Optimizer Hyperparameters
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
@@ -20,9 +20,14 @@ def get_parser():
     parser.add_argument("--beta2", type=float, default=0.999, help="AdamW beta2")
     parser.add_argument("--weight_decay", type=float, default=0.1, help="AdamW weight decay")
 
+    # Loss Hyperparameters
+    # parser.add_argument(
+    #     "--eot_weight", type=float, default=0.1, help="Weight for the end-of-text token in the loss function"
+    # )
+
     # Training Hyperparameters
     parser.add_argument("--batch_size", type=int, default=64, help="Batch size")
-    parser.add_argument("--context_length", type=int, default=256, help="Context length")
+    # parser.add_argument("--context_length", type=int, default=256, help="Context length")
     parser.add_argument("--iterations", type=int, default=20000, help="Number of training iterations")
     parser.add_argument("--warmup_iters", type=int, default=2000, help="Number of warmup iterations")
     parser.add_argument("--cos_cycle_iters", type=int, default=20000, help="Number of cos cycle iterations")
@@ -94,4 +99,3 @@ def get_parser():
     parser.add_argument("--temperature", type=float, default=0.8, help="temperature")
     parser.add_argument("--top_p", type=float, default=0.9, help="Inferencing top_p kernel search")
     return parser
-

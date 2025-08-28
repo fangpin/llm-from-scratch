@@ -303,6 +303,7 @@ class CrossEntropyLoss(torch.nn.Module):
 
         correct_log_probs = log_probs[torch.arange(len(log_probs)), targets]
         nll = -correct_log_probs
+
         mean_loss = torch.mean(nll)
 
         return mean_loss
@@ -439,3 +440,4 @@ if __name__ == "__main__":
             loss.backward()  # Run backward pass, which computes gradients.
             opt.step()  # Run optimizer step.
             print(f"lr={lr}, t={t}, loss={loss}")
+

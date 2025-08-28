@@ -32,6 +32,32 @@ def get_batch(x: np.ndarray, batch_size: int, context_length: int, device: str) 
     return input_seqs.to(device), target_seqs.to(device)
 
 
+# def get_batch_no_special(
+#     x: np.ndarray, batch_size: int, context_length: int, device: str
+# ) -> tuple[torch.Tensor, torch.Tensor]:
+#     """
+#     Generates a batch of input and target sequences from the tokenized data.
+#
+#     Args:
+#         x: A numpy array of token IDs.
+#         batch_size: The number of sequences in a batch.
+#         context_length: The length of each sequence.
+#         device: The PyTorch device to place the tensors on (e.g., 'cpu', 'cuda:0').
+#
+#     Returns:
+#         A tuple containing the input and target sequences as PyTorch tensors.
+#     """
+#     # Generate random starting indices for the batches
+#     ix = torch.randint(0, len(x) - context_length, (batch_size,))
+#
+#     # Create the input and target sequences
+#     input_seqs = torch.stack([torch.from_numpy(x[i : i + context_length].astype(np.int64)) for i in ix])
+#     target_seqs = torch.stack([torch.from_numpy(x[i + 1 : i + 1 + context_length].astype(np.int64)) for i in ix])
+#
+#     # Move the tensors to the specified device
+#     return input_seqs.to(device), target_seqs.to(device)
+
+
 def train():
     parser = argparse.ArgumentParser(description="Train a Transformer model.")
 
@@ -46,8 +72,8 @@ def train():
 
     # Data Loading
     print("Loading data...")
-    train_data = np.memmap(args.train_data, dtype=np.uint16, mode="r")
-    val_data = np.memmap(args.val_data, dtype=np.uint16, mode="r")
+    train_data = np.memmap(args.train_data, mode="r")
+    val_data = np.memmap(args.val_data, mode="r")
 
     # Model Initialization
     print("Initializing model...")
@@ -69,14 +95,31 @@ def train():
         weight_decay=args.weight_decay,
     )
 
-    # Loss Function
     criterion = CrossEntropyLoss()
+    # criterion = torch.nn.CrossEntropyLoss(ignore_index=0)
 
     # Training Loop
     print("Starting training...")
     for i in range(args.iterations + 1):
+        # Validation
+        if i % args.val_interval == 0:
+            model.eval()
+            val_loss = 0
+            with torch.no_grad():
+                for _ in range(100):  # 100 batches for validation
+                    val_inputs, val_targets = get_batch(val_data, args.batch_size, args.max_seq_len, args.device)
+                    val_logits = model(val_inputs)
+                    val_loss += criterion(val_logits, val_targets).item()
+            val_loss /= 100
+            print(f"Iteration {i}, Validation Loss: {val_loss:.4f}")
+            print(
+                f"Iteration {i}, Validation logits: {val_logits[0][-1]}, choose_token_id: {torch.argmax(val_logits[0][-1])}"
+            )
+            model.train()
+            writer.add_scalar("val_loss", val_loss, i)
+
         # Get a batch of training data
-        inputs, targets = get_batch(train_data, args.batch_size, args.context_length, args.device)
+        inputs, targets = get_batch(train_data, args.batch_size, args.max_seq_len, args.device)
 
         # Forward pass
         logits = model(inputs)
@@ -105,21 +148,6 @@ def train():
         if i % args.log_interval == 0:
             print(f"Iteration {i}, Training Loss: {loss.item():.4f}, LR: {lr:.6f}")
 
-        # Validation
-        if i % args.val_interval == 0:
-            model.eval()
-            val_loss = 0
-            with torch.no_grad():
-                for _ in range(100):  # 100 batches for validation
-                    val_inputs, val_targets = get_batch(val_data, args.batch_size, args.context_length, args.device)
-                    val_logits = model(val_inputs)
-                    val_loss += criterion(val_logits, val_targets).item()
-            val_loss /= 100
-            print(f"Iteration {i}, Validation Loss: {val_loss:.4f}")
-            print(f"Iteration {i}, Validation logits: {val_logits[0][-1]}")
-            model.train()
-            writer.add_scalar("val_loss", val_loss, i)
-
         # Checkpointing
         if i % args.checkpoint_interval == 0 and i > 0:
             save_checkpoint(model, optimizer, i, os.path.join(args.checkpoint_path, f"chpt_{i}.pt"))
@@ -128,4 +156,3 @@ def train():
 
 if __name__ == "__main__":
     train()
-
