@@ -46,8 +46,10 @@ def train():
 
     # Data Loading
     print("Loading data...")
-    train_data = np.load(args.train_data)
-    val_data = np.load(args.val_data)
+    # train_data = np.load(args.train_data)
+    # val_data = np.load(args.val_data)
+    train_data = np.load(args.train_data, mmap_mode="r")
+    val_data = np.load(args.val_data, mmap_mode="r")
 
     # Model Initialization
     print("Initializing model...")
@@ -86,9 +88,7 @@ def train():
                     val_loss += criterion(val_logits, val_targets).item()
             val_loss /= 100
             print(f"Iteration {i}, Validation Loss: {val_loss:.4f}")
-            print(
-                f"Iteration {i}, Validation logits: {val_logits[0][-1]}, choose_token_id: {torch.argmax(val_logits[0][-1])}"
-            )
+            print(f"Iteration {i}, Validation logits: {val_logits[0][-1]}")
             model.train()
             writer.add_scalar("val_loss", val_loss, i)
 

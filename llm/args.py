@@ -10,7 +10,7 @@ def get_parser():
     parser.add_argument("--d_ff", type=int, default=1024, help="Feed-forward dimension")
     parser.add_argument("--vocab_size", type=int, default=2048, help="Vocabulary size")
     parser.add_argument("--num_layers", type=int, default=6, help="Number of transformer layers")
-    parser.add_argument("--max_seq_len", type=int, default=64, help="Maximum sequence length")
+    parser.add_argument("--max_seq_len", type=int, default=512, help="Maximum sequence length")
 
     # Optimizer Hyperparameters
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")

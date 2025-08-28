@@ -43,7 +43,7 @@ def generate(prompt: str) -> tuple[str, list[int]]:
             logits = model(input_ids_cond, token_positions)
             # Take the logits for the last token
             logits = logits[:, -1, :]
-            print(logits)
+            # print(logits)
 
             # Apply temperature scaling
             logits = logits / args.temperature
@@ -87,3 +87,4 @@ if __name__ == "__main__":
     output, output_token_ids = generate(prompt)
     print(f"Completion: {output}")
     print(output_token_ids)
+
