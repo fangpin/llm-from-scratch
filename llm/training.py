@@ -46,8 +46,8 @@ def train():
 
     # Data Loading
     print("Loading data...")
-    train_data = np.memmap(args.train_data, mode="r")
-    val_data = np.memmap(args.val_data, mode="r")
+    train_data = np.load(args.train_data)
+    val_data = np.load(args.val_data)
 
     # Model Initialization
     print("Initializing model...")

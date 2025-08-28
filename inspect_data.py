@@ -21,8 +21,16 @@ def inspect_token_distribution(data_path: str, tokenizer_path: str, sample_size:
     # Load data
     data = np.load(data_path, mmap_mode="r")
 
-    # Sample data
-    sample = data[:sample_size] if len(data) > sample_size else data
+    # Sample data from random locations
+    if sample_size >= len(data):
+        sample = data
+    else:
+        indices = np.random.randint(0, len(data) - 100, size=(sample_size // 100,))
+        sample_list = [data[i:i+100] for i in indices]
+        if not sample_list:
+            sample = data[:sample_size] # Fallback for small files
+        else:
+            sample = np.concatenate(sample_list)
 
     # Count token frequencies
     token_counts = Counter(sample.tolist())
