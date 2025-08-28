@@ -8,9 +8,7 @@ import os
 from torch.utils.tensorboard.writer import SummaryWriter
 
 
-def get_batch(
-    x: np.ndarray, batch_size: int, context_length: int, device: str
-) -> tuple[torch.Tensor, torch.Tensor]:
+def get_batch(x: np.ndarray, batch_size: int, context_length: int, device: str) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Generates a batch of input and target sequences from the tokenized data.
 
@@ -113,13 +111,12 @@ def train():
             val_loss = 0
             with torch.no_grad():
                 for _ in range(100):  # 100 batches for validation
-                    val_inputs, val_targets = get_batch(
-                        val_data, args.batch_size, args.context_length, args.device
-                    )
+                    val_inputs, val_targets = get_batch(val_data, args.batch_size, args.context_length, args.device)
                     val_logits = model(val_inputs)
                     val_loss += criterion(val_logits, val_targets).item()
             val_loss /= 100
             print(f"Iteration {i}, Validation Loss: {val_loss:.4f}")
+            print(f"Iteration {i}, Validation logits: {val_logits[0][-1]}")
             model.train()
             writer.add_scalar("val_loss", val_loss, i)
 
@@ -131,3 +128,4 @@ def train():
 
 if __name__ == "__main__":
     train()
+
