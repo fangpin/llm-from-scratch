@@ -32,32 +32,6 @@ def get_batch(x: np.ndarray, batch_size: int, context_length: int, device: str) 
     return input_seqs.to(device), target_seqs.to(device)
 
 
-# def get_batch_no_special(
-#     x: np.ndarray, batch_size: int, context_length: int, device: str
-# ) -> tuple[torch.Tensor, torch.Tensor]:
-#     """
-#     Generates a batch of input and target sequences from the tokenized data.
-#
-#     Args:
-#         x: A numpy array of token IDs.
-#         batch_size: The number of sequences in a batch.
-#         context_length: The length of each sequence.
-#         device: The PyTorch device to place the tensors on (e.g., 'cpu', 'cuda:0').
-#
-#     Returns:
-#         A tuple containing the input and target sequences as PyTorch tensors.
-#     """
-#     # Generate random starting indices for the batches
-#     ix = torch.randint(0, len(x) - context_length, (batch_size,))
-#
-#     # Create the input and target sequences
-#     input_seqs = torch.stack([torch.from_numpy(x[i : i + context_length].astype(np.int64)) for i in ix])
-#     target_seqs = torch.stack([torch.from_numpy(x[i + 1 : i + 1 + context_length].astype(np.int64)) for i in ix])
-#
-#     # Move the tensors to the specified device
-#     return input_seqs.to(device), target_seqs.to(device)
-
-
 def train():
     parser = argparse.ArgumentParser(description="Train a Transformer model.")
 

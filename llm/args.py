@@ -13,12 +13,12 @@ def get_parser():
     parser.add_argument("--max_seq_len", type=int, default=64, help="Maximum sequence length")
 
     # Optimizer Hyperparameters
-    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
-    parser.add_argument("--lr_min", type=float, default=1e-4, help="Min learning rate in cos lr scheduler")
-    parser.add_argument("--lr_max", type=float, default=1e-3, help="Max learning rate in cos lr scheduler")
+    parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
+    parser.add_argument("--lr_min", type=float, default=1e-5, help="Min learning rate in cos lr scheduler")
+    parser.add_argument("--lr_max", type=float, default=1e-4, help="Max learning rate in cos lr scheduler")
     parser.add_argument("--beta1", type=float, default=0.9, help="AdamW beta1")
     parser.add_argument("--beta2", type=float, default=0.999, help="AdamW beta2")
-    parser.add_argument("--weight_decay", type=float, default=0.1, help="AdamW weight decay")
+    parser.add_argument("--weight_decay", type=float, default=0.01, help="AdamW weight decay")
 
     # Loss Hyperparameters
     # parser.add_argument(
@@ -29,7 +29,7 @@ def get_parser():
     parser.add_argument("--batch_size", type=int, default=64, help="Batch size")
     # parser.add_argument("--context_length", type=int, default=256, help="Context length")
     parser.add_argument("--iterations", type=int, default=20000, help="Number of training iterations")
-    parser.add_argument("--warmup_iters", type=int, default=2000, help="Number of warmup iterations")
+    parser.add_argument("--warmup_iters", type=int, default=5000, help="Number of warmup iterations")
     parser.add_argument("--cos_cycle_iters", type=int, default=20000, help="Number of cos cycle iterations")
     parser.add_argument(
         "--device",
