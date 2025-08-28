@@ -11,6 +11,7 @@ This repository contains a from-scratch implementation of a modern decoder-only 
   * **RMSNorm:** for efficient and stable layer normalization.
   * **SwiGLU:** activation function in the feed-forward network for improved performance.
   * **Rotary Position Embeddings (RoPE):** for effective positional encoding.
+* **Distributed Training:** Supports Distributed Data Parallel (DDP) for training on multiple GPUs.
 * **Custom BPE Tokenizer:** A from-scratch implementation of the Byte Pair Encoding (BPE) tokenizer, which can be trained on any text corpus.
 * **Custom Optimizers:** Includes custom implementations of `AdamW` and `SGDDecay` optimizers.
 * **Comprehensive Training and Generation Scripts:** Provides scripts for training the model on a large corpus and for generating text with a trained model.
@@ -61,6 +62,8 @@ The Transformer model in this repository is a decoder-only model, similar to the
 
 ## Usage
 
+**Note:** The following commands use `uv run`, which is a tool for running commands in a virtual environment. If you are not using `uv`, you can replace `uv run` with `python`. For example, `uv run -m llm.training` becomes `python -m llm.training`.
+
 ### 1. Preparing the Data
 
 The training script expects the training and validation data to be in the form of memory-mapped numpy arrays of token IDs. You can use the trained tokenizer to convert your text data into this format.
@@ -101,12 +104,38 @@ The `llm/training.py` script is used to train the Transformer model.
 uv run -m llm.training
 ```
 
+To run with distributed training, use the following command:
+
+```bash
+torchrun --standalone --nproc_per_node=2 -m llm.training
+```
+
 ### 4. Generating Text
 
 Once you have a trained model, you can use `llm/generating.py` to generate text.
 
 ```bash
 uv run -m llm.generating
+```
+
+## Data Inspection
+
+This project includes a script to inspect the quality of your training and validation data. The `inspect_data.py` script checks for token distribution, frequency of special tokens, and batch diversity. This can be useful to ensure your data is suitable for training.
+
+To use the script, run:
+
+```bash
+uv run inspect_data.py
+```
+
+## Benchmarking
+
+A benchmarking script is provided in `kernel/benchmarking_model.py` to measure the performance of the Transformer model. This script can be used to evaluate the training and inference speed.
+
+To run the benchmark, use the following command:
+
+```bash
+uv run kernel/benchmarking_model.py
 ```
 
 ## Testing
@@ -122,6 +151,7 @@ The tests cover:
 * The correctness of each module in the Transformer model by comparing its output with reference implementations.
 * The BPE tokenizer's encoding and decoding, as well as its training process.
 * The optimizers and other utilities.
+* Distributed training setup.
 
 ## Training
 
@@ -133,7 +163,26 @@ The tests cover:
 
 ![Learning Rate Schedule](img/lr.png)
 
-## Example Output
+## Example LLM Output
+
+After training Tiny stories dataset, you can get the following output by using the trained model to generate text with the prompt "tell you a story".
+
+```bash
+Prompt: tell you a story
+Completion:  about an a magic box. It said: "I know you can live there, and you can choose. You will see it and keep it in your heart. It will be fun and healthy."
+Lily was amazed. She liked the heart. She liked the story. She wondered what the heart was. She wondered what was inside. She wanted to find out what the heart was.
+"Please, Mr. Snowman. He is a gift from my story. He is very special. He is very special. He has a new heart and a smile. He is a symbol. He is a gift from his grandma. He is very proud of him. He wanted to be his friend. He took the heart and went to his room. He told Lily he was very smart and kind.
+Lily was happy. She had made a new friend. She did not know that Mr. Snowman was a good friend. He had a very special heart. He had a friend. He had a heart and a hug. He could tell Lily about his heart. He had many friends. He did not hear any of the heart. He was a big, friendly dog. He liked to play with Lily. He liked to play with Lily. He had many friends.
+<|endoftext|>
+
+```
+
+```bash
+Prompt: tell you a story
+Completion: ."
+Tim and Sam looked at each other and started to laugh. They knew they were going to have a big party. They said sorry to each other and hugged. They played games and ate cake and shared their cookies. They were happy and loved.
+<|endoftext|>
+```
 
 ## License
 

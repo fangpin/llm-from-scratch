@@ -88,7 +88,6 @@ def train():
                     val_loss += criterion(val_logits, val_targets).item()
             val_loss /= 100
             print(f"Iteration {i}, Validation Loss: {val_loss:.4f}")
-            print(f"Iteration {i}, Validation logits: {val_logits[0][-1]}")
             model.train()
             writer.add_scalar("val_loss", val_loss, i)
 

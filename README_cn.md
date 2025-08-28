@@ -11,6 +11,7 @@
     *   **RMSNorm：** 用于高效稳定的层归一化。
     *   **SwiGLU：** 前馈网络中的激活函数，以提高性能。
     *   **旋转位置嵌入 (RoPE)：** 用于有效的位置编码。
+*   **分布式训练:** 支持使用分布式数据并行 (DDP) 在多个 GPU 上进行训练。
 *   **自定义 BPE 分词器：** 从零开始实现的字节对编码 (BPE) 分词器，可以在任何文本语料库上进行训练。
 *   **自定义优化器：** 包括 `AdamW` 和 `SGDDecay` 优化器的自定义实现。
 *   **全面的训练和生成脚本：** 提供用于在大型语料库上训练模型以及使用训练好的模型生成文本的脚本。
@@ -61,6 +62,8 @@
 
 ## 使用方法
 
+**注意:** 以下命令使用 `uv run`，这是一个在虚拟环境中运行命令的工具。如果您没有使用 `uv`，您可以将 `uv run` 替换为 `python`。例如，`uv run -m llm.training` 变为 `python -m llm.training`。
+
 ### 1. 准备数据
 
 训练脚本期望训练和验证数据是内存映射的 NumPy 数组形式的词元 ID。您可以使用训练好的分词器将您的文本数据转换为此格式。
@@ -101,12 +104,38 @@ uv run -m llm.bpe_tokenizer
 uv run -m llm.training
 ```
 
+要进行分布式训练，请使用以下命令：
+
+```bash
+torchrun --standalone --nproc_per_node=2 -m llm.training
+```
+
 ### 4. 生成文本
 
 一旦您有了训练好的模型，就可以使用 `llm/generating.py` 来生成文本。
 
 ```bash
 uv run -m llm.generating
+```
+
+## 数据检查
+
+该项目包含一个用于检查训练和验证数据质量的脚本。`inspect_data.py` 脚本会检查令牌分布、特殊令牌的频率以及批次多样性。这对于确保您的数据适合训练非常有用。
+
+要使用该脚本，请运行：
+
+```bash
+uv run inspect_data.py
+```
+
+## 基准测试
+
+`kernel/benchmarking_model.py` 中提供了一个基准测试脚本，用于衡量 Transformer 模型的性能。该脚本可用于评估训练和推理速度。
+
+要运行基准测试，请使用以下命令：
+
+```bash
+uv run kernel/benchmarking_model.py
 ```
 
 ## 测试
@@ -122,6 +151,7 @@ uv run pytest
 *   通过将其输出与参考实现进行比较，来验证 Transformer 模型中每个模块的正确性。
 *   BPE 分词器的编码和解码，以及其训练过程。
 *   优化器和其他实用工具。
+*   分布式训练设置。
 
 ## 训练
 
@@ -132,6 +162,27 @@ uv run pytest
 ### 学习率表
 
 ![学习率表](img/lr.png)
+
+## LLM 输出示例
+
+在训练完 Tiny stories 数据集后，您可以使用训练好的模型，通过提示“tell you a story”来生成文本，可以得到以下输出。
+
+```bash
+Prompt: tell you a story
+Completion:  about an a magic box. It said: "I know you can live there, and you can choose. You will see it and keep it in your heart. It will be fun and healthy."
+Lily was amazed. She liked the heart. She liked the story. She wondered what the heart was. She wondered what was inside. She wanted to find out what the heart was.
+"Please, Mr. Snowman. He is a gift from my story. He is very special. He is very special. He has a new heart and a smile. He is a symbol. He is a gift from his grandma. He is very proud of him. He wanted to be his friend. He took the heart and went to his room. He told Lily he was very smart and kind.
+Lily was happy. She had made a new friend. She did not know that Mr. Snowman was a good friend. He had a very special heart. He had a friend. He had a heart and a hug. He could tell Lily about his heart. He had many friends. He did not hear any of the heart. He was a big, friendly dog. He liked to play with Lily. He liked to play with Lily. He had many friends.
+<|endoftext|>
+
+```
+
+```bash
+Prompt: tell you a story
+Completion: ."
+Tim and Sam looked at each other and started to laugh. They knew they were going to have a big party. They said sorry to each other and hugged. They played games and ate cake and shared their cookies. They were happy and loved.
+<|endoftext|>
+```
 
 ## 许可证
 
