@@ -176,7 +176,7 @@ class MultiHeadAttention(torch.nn.Module):
         self.dot_product_att = ScaledDotProductAttention()
 
         # Cache causal mask - removed the ~ operator
-        causal_mask = torch.triu(torch.ones(max_seq_len, max_seq_len, dtype=torch.bool), diagonal=1)
+        causal_mask = torch.triu(torch.ones(max_seq_len, max_seq_len, dtype=torch.bool, device=device), diagonal=1)
         self.register_buffer("causal_mask", causal_mask)
 
     def forward(self, x: Float[Tensor, "b s d"]) -> torch.Tensor:
@@ -443,4 +443,3 @@ if __name__ == "__main__":
             loss.backward()  # Run backward pass, which computes gradients.
             opt.step()  # Run optimizer step.
             print(f"lr={lr}, t={t}, loss={loss}")
-

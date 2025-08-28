@@ -130,13 +130,7 @@ uv run inspect_data.py
 
 ## 基准测试
 
-`kernel/benchmarking_model.py` 中提供了一个基准测试脚本，用于衡量 Transformer 模型的性能。该脚本可用于评估训练和推理速度。
-
-要运行基准测试，请使用以下命令：
-
-```bash
-uv run kernel/benchmarking_model.py
-```
+关于模型性能和组件的基准测试详情，请参阅 [BENCHMARK.md](BENCHMARK.md)。
 
 ## 测试
 

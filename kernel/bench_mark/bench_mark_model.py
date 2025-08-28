@@ -16,6 +16,7 @@ def benchmark(
     forward_only: bool,
     device: str,
     dtype: torch.dtype,
+    memory_profile_path: str,
     steps=100,
 ):
     model = Transformer(
@@ -44,6 +45,7 @@ def benchmark(
 
     torch.cuda.synchronize()
 
+    torch.cuda.memory._record_memory_history("all")
     start = timeit.default_timer()
     for _ in range(steps):
         if forward_only:
@@ -54,7 +56,10 @@ def benchmark(
             loss = criterion(logits, targets)
             loss.backward()
 
+    torch.cuda.memory._dump_snapshot(memory_profile_path)
     torch.cuda.synchronize()
+    # This will output a file memory_snapshot.pickle that you can load into the following online tool: https://pytorch.org/memory_viz
+    torch.cuda.memory._record_memory_history(None)
     end = timeit.default_timer()
 
     print(f"Time per iteration: {(end - start) * 1000 / steps:.3f} ms, total time: {(end - start) * 1000:.3f} ms")
@@ -74,4 +79,25 @@ if __name__ == "__main__":
     parser.add_argument("--warmup_steps", type=int, default=1000, help="Number of warmup steps, default=1000")
     parser.add_argument("--forward_only", type=bool, default=False, help="only benchmark forward pass, default=false")
     parser.add_argument("--device", type=str, default="cuda:0", help="device")
+    parser.add_argument(
+        "--memory_profile_path", type=str, default="log/memory_snapshot.pickle", help="memory snapshot path"
+    )
 
+    args = parser.parse_args()
+
+    dtype = torch.bfloat16 if args.device.startswith("cuda") else torch.float32
+
+    benchmark(
+        d_model=args.d_model,
+        num_heads=args.num_heads,
+        d_ff=args.d_ff,
+        vocab_size=args.vocab_size,
+        num_layers=args.num_layers,
+        batch_size=args.batch_size,
+        seq_len=args.seq_len,
+        warmup_steps=args.warmup_steps,
+        forward_only=args.forward_only,
+        device=args.device,
+        dtype=dtype,
+        memory_profile_path=args.memory_profile_path,
+    )

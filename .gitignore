@@ -11,3 +11,6 @@ output.prof
 llm/__pycache__
 __pycache__
 __pycache__
+docs/implementation_principles.md
+docs/technical_deep_dive.md
+log/memory_snapshot.pickle
