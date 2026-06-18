@@ -6,7 +6,7 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "test": "vitest run tests/routes.spec.ts tests/content.spec.ts tests/docs.spec.ts",
+    "test": "vitest run tests/routes.spec.ts tests/content.spec.ts tests/docs.spec.ts tests/package-lock.spec.ts",
     "test:e2e": "playwright test"
   },
   "dependencies": {
