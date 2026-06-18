@@ -18,7 +18,7 @@ export const siteContent = {
         eyebrow: "Decoder-only Transformer • PyTorch • From Scratch",
         subtitle: "Build, train, benchmark, and fine-tune a modern language model from first principles.",
         actions: [
-          { label: "View on GitHub", href: "https://github.com/fangpin/lm", variant: "primary" },
+          { label: "View on GitHub", href: "https://github.com/fangpin/llm-from-scratch", variant: "primary" },
           { label: "Explore Docs", href: "/docs", variant: "secondary" },
         ],
         proofMetrics: [
@@ -122,7 +122,7 @@ export const siteContent = {
         eyebrow: "Decoder-only Transformer • PyTorch • 从零实现",
         subtitle: "从分词器、训练、基准到微调，完整展示这个语言模型项目的核心实现。",
         actions: [
-          { label: "查看 GitHub", href: "https://github.com/fangpin/lm", variant: "primary" },
+          { label: "查看 GitHub", href: "https://github.com/fangpin/llm-from-scratch", variant: "primary" },
           { label: "浏览文档", href: "/zh/docs", variant: "secondary" },
         ],
         proofMetrics: [

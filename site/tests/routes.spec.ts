@@ -20,8 +20,8 @@ describe("locale route parity", () => {
   });
 
   it("prefixes internal routes with the deployment base path", () => {
-    expect(toBasePath("/", "/lm/")).toBe("/lm/");
-    expect(toBasePath("/docs", "/lm/")).toBe("/lm/docs");
+    expect(toBasePath("/", "/llm-from-scratch/")).toBe("/llm-from-scratch/");
+    expect(toBasePath("/docs", "/llm-from-scratch/")).toBe("/llm-from-scratch/docs");
   });
 
   it("maps mirrored routes in both directions", () => {

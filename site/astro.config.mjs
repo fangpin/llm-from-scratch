@@ -1,7 +1,7 @@
 import { defineConfig } from "astro/config";
 import remarkGfm from "remark-gfm";
 
-const repo = "lm";
+const repo = "llm-from-scratch";
 
 export default defineConfig({
   site: "https://fangpin.github.io",

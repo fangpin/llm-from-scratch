@@ -5,10 +5,10 @@
 
 本代码库包含一个从零开始用 PyTorch 实现的现代化仅解码器 Transformer 模型，专为教育目的而构建。它包含了现代语言模型的所有基本构建模块，以清晰、模块化和易于理解的方式编写。该项目的目标是为学习如何从头开始构建大型语言模型提供一个全面的资源。
 
-- [项目主页](https://fangpin.github.io/lm/)
-- [文档首页](https://fangpin.github.io/lm/docs/)
-- [Transformer 核心](https://fangpin.github.io/lm/docs/transformer-core/)
-- [分布式训练](https://fangpin.github.io/lm/docs/distributed-training/)
+- [项目主页](https://fangpin.github.io/llm-from-scratch/)
+- [文档首页](https://fangpin.github.io/llm-from-scratch/docs/)
+- [Transformer 核心](https://fangpin.github.io/llm-from-scratch/docs/transformer-core/)
+- [分布式训练](https://fangpin.github.io/llm-from-scratch/docs/distributed-training/)
 
 ## 特性
 
@@ -182,11 +182,11 @@ uv run -m llm.generating
 
 仓库内包含一个用于 GitHub Pages 的 Astro 双语项目站，位于 `site/`。
 
-- [项目主页](https://fangpin.github.io/lm/)
-- [文档首页](https://fangpin.github.io/lm/docs/)
-- [中文文档首页](https://fangpin.github.io/lm/zh/docs/)
-- [Transformer 核心章节](https://fangpin.github.io/lm/docs/transformer-core/)
-- [分布式训练章节](https://fangpin.github.io/lm/docs/distributed-training/)
+- [项目主页](https://fangpin.github.io/llm-from-scratch/)
+- [文档首页](https://fangpin.github.io/llm-from-scratch/docs/)
+- [中文文档首页](https://fangpin.github.io/llm-from-scratch/zh/docs/)
+- [Transformer 核心章节](https://fangpin.github.io/llm-from-scratch/docs/transformer-core/)
+- [分布式训练章节](https://fangpin.github.io/llm-from-scratch/docs/distributed-training/)
 
 ```bash
 npm --prefix site install

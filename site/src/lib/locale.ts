@@ -40,4 +40,4 @@ export function toBasePath(path: string, base = "/") {
   return path === "/" ? `${normalizedBase}/` || "/" : `${normalizedBase}${path}`;
 }
 
-export const SITE_BASE_PATH = "/lm/";
+export const SITE_BASE_PATH = "/llm-from-scratch/";
