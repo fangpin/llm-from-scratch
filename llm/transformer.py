@@ -7,9 +7,6 @@ from torch import Tensor
 from jaxtyping import Float
 
 
-ParamsT: TypeAlias = Iterable[torch.Tensor] | Iterable[dict[str, Any]] | Iterable[tuple[str, torch.Tensor]]
-
-
 class Linear(torch.nn.Module):
     def __init__(
         self, in_features, out_features, weights: Float[Tensor, " out in"] | None = None, device=None, dtype=None
@@ -101,7 +98,6 @@ class RoPE(torch.nn.Module):
 
         emb = freqs.repeat_interleave(2, dim=-1)  # (seq_len, dim)
 
-        # Now register buffers
         self.register_buffer("cos_cached", emb.cos().to(dtype))  # (seq_len, dim)
         self.register_buffer("sin_cached", emb.sin().to(dtype))
 
@@ -338,6 +334,9 @@ class SGDDecay(torch.optim.Optimizer):
                 p.data -= lr / math.sqrt(t + 1) * grad
                 state["t"] = t + 1
         return loss
+
+
+ParamsT: TypeAlias = Iterable[torch.Tensor] | Iterable[dict[str, Any]] | Iterable[tuple[str, torch.Tensor]]
 
 
 class AdamW(torch.optim.Optimizer):

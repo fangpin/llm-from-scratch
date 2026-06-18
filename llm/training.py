@@ -31,16 +31,14 @@ def set_random_seed(seed: int, rank: int):
     torch.backends.cudnn.benchmark = False
 
 
-def get_batch(
-    x: np.ndarray, batch_size: int, context_length: int, device: str
-) -> tuple[torch.Tensor, torch.Tensor]:
+def get_batch(x: np.ndarray, batch_size: int, context_length: int, device: str) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Generates a batch of input and target sequences from the tokenized data.
 
     Args:
         x: A numpy array of token IDs.
         batch_size: The number of sequences in a batch.
-        context_length: The length of each sequence.
+        context_length: The max length of each sample sequence.
         device: The PyTorch device to place the tensors on (e.g., 'cpu', 'cuda:0').
 
     Returns:
@@ -50,15 +48,8 @@ def get_batch(
     ix = torch.randint(0, len(x) - context_length, (batch_size,))
 
     # Create the input and target sequences
-    input_seqs = torch.stack(
-        [torch.from_numpy(x[i : i + context_length].astype(np.int64)) for i in ix]
-    )
-    target_seqs = torch.stack(
-        [
-            torch.from_numpy(x[i + 1 : i + 1 + context_length].astype(np.int64))
-            for i in ix
-        ]
-    )
+    input_seqs = torch.stack([torch.from_numpy(x[i : i + context_length].astype(np.int64)) for i in ix])
+    target_seqs = torch.stack([torch.from_numpy(x[i + 1 : i + 1 + context_length].astype(np.int64)) for i in ix])
 
     # Move the tensors to the specified device
     return input_seqs.to(device), target_seqs.to(device)
@@ -153,9 +144,7 @@ def _train(rank, world_size, backend, args):
                 val_loss = 0
                 with torch.no_grad():
                     for _ in range(100):  # 100 batches for validation
-                        val_inputs, val_targets = get_batch(
-                            val_data, mini_batch_size, args.max_seq_len, device
-                        )
+                        val_inputs, val_targets = get_batch(val_data, mini_batch_size, args.max_seq_len, device)
                         val_logits = model(val_inputs)
                         val_loss += criterion(val_logits, val_targets).item()
                 val_loss /= 100
@@ -164,9 +153,7 @@ def _train(rank, world_size, backend, args):
                 writer.add_scalar("val_loss", val_loss, i)
 
             # Get a batch of training data
-            inputs, targets = get_batch(
-                train_data, mini_batch_size, args.max_seq_len, device
-            )
+            inputs, targets = get_batch(train_data, mini_batch_size, args.max_seq_len, device)
 
             # Forward pass
             logits = model(inputs)
@@ -196,9 +183,7 @@ def _train(rank, world_size, backend, args):
                 writer.add_scalar("lr", lr, i)
                 # Logging
                 if i % args.log_interval == 0:
-                    print(
-                        f"Iteration {i}, Training Loss: {loss.item():.4f}, LR: {lr:.6f}"
-                    )
+                    print(f"Iteration {i}, Training Loss: {loss.item():.4f}, LR: {lr:.6f}")
 
                 # Checkpointing
                 if i % args.checkpoint_interval == 0 and i > 0:
@@ -217,9 +202,7 @@ def train():
     parser = get_parser()
     args = parser.parse_args()
 
-    assert args.batch_size % args.world_size == 0, (
-        "Batch size must be divisible by world size"
-    )
+    assert args.batch_size % args.world_size == 0, "Batch size must be divisible by world size"
 
     # Create checkpoint directory if it doesn't exist
     os.makedirs(args.checkpoint_path, exist_ok=True)

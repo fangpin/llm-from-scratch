@@ -137,33 +137,33 @@ class BpeTokenizer:
         with open(input_path) as f:
             corpus = f.read().encode("utf-8", self.errors)
 
-        for token in self.special_tokens:
-            self.vcab2id[token] = len(self.vcab2id)
+        for tokens in self.special_tokens:
+            self.vcab2id[tokens] = len(self.vcab2id)
 
         for i in range(256):
             self.vcab2id[bytes([i])] = len(self.vcab2id)
 
         pre_tokens = self._pre_token(corpus)
 
-        word_cnt: dict[tuple[bytes, ...], int] = {}
+        tokens_cnt: dict[tuple[bytes, ...], int] = {}
         for pre_token in pre_tokens:
             if pre_token in self.special_tokens:
                 continue
             bs = tuple(bytes([b]) for b in pre_token)
             if not bs:
                 continue
-            word_cnt[bs] = word_cnt.get(bs, 0) + 1
+            tokens_cnt[bs] = tokens_cnt.get(bs, 0) + 1
 
         if verbose:
-            print(f"cnt of distinct word: {len(word_cnt)}")
+            print(f"cnt of distinct word: {len(tokens_cnt)}")
 
         pair_cnt = dict[tuple[bytes, bytes], int]()
-        for word, cnt in word_cnt.items():
-            for pair in zip(word[:-1], word[1:]):
+        for tokens, cnt in tokens_cnt.items():
+            for pair in zip(tokens[:-1], tokens[1:]):
                 pair_cnt[pair] = pair_cnt.get(pair, 0) + cnt
 
-        def update_pair_counts(word: tuple[bytes, ...], pair_cnt: dict[tuple[bytes, bytes], int], cnt: int, sign=1):
-            for pair in zip(word[:-1], word[1:]):
+        def update_pair_counts(tokens: tuple[bytes, ...], pair_cnt: dict[tuple[bytes, bytes], int], cnt: int, sign=1):
+            for pair in zip(tokens[:-1], tokens[1:]):
                 pair_cnt[pair] = pair_cnt.get(pair, 0) + cnt * sign
                 if pair_cnt.get(pair, 0) <= 0:
                     del pair_cnt[pair]
@@ -175,93 +175,34 @@ class BpeTokenizer:
             self.vcab2id[best_pair[0] + best_pair[1]] = len(self.vcab2id)
             self.merges.append(best_pair)
 
-            new_word_cnt: dict[tuple[bytes, ...], int] = {}
+            new_tokens_cnt: dict[tuple[bytes, ...], int] = {}
             merged = False
-            for word, cnt in word_cnt.items():
-                new_word_list = []
+            for tokens, cnt in tokens_cnt.items():
+                new_token_list = []
                 i = 0
-                while i < len(word):
-                    if i < len(word) - 1 and word[i] == best_pair[0] and word[i + 1] == best_pair[1]:
-                        new_word_list.append(best_pair[0] + best_pair[1])
+                while i < len(tokens):
+                    if i < len(tokens) - 1 and tokens[i] == best_pair[0] and tokens[i + 1] == best_pair[1]:
+                        new_token_list.append(best_pair[0] + best_pair[1])
                         i += 2
                     else:
-                        new_word_list.append(word[i])
+                        new_token_list.append(tokens[i])
                         i += 1
 
-                new_word = tuple(new_word_list)
-                if word != new_word:
+                new_tokens = tuple(new_token_list)
+                if tokens != new_tokens:
                     merged = True
-                    update_pair_counts(word, pair_cnt, cnt, -1)
-                    update_pair_counts(new_word, pair_cnt, cnt, 1)
+                    update_pair_counts(tokens, pair_cnt, cnt, -1)
+                    update_pair_counts(new_tokens, pair_cnt, cnt, 1)
 
-                new_word_cnt[new_word] = new_word_cnt.get(new_word, 0) + cnt
+                new_tokens_cnt[new_tokens] = new_tokens_cnt.get(new_tokens, 0) + cnt
 
             if not merged:
                 break
-            word_cnt = new_word_cnt
+            tokens_cnt = new_tokens_cnt
 
         self.id2vcab = {id: vcab for vcab, id in self.vcab2id.items()}
         self.merge_ranks = {pair: i for i, pair in enumerate(self.merges)}
         return self.id2vcab, self.merges
-
-
-def inspect_data():
-    """
-    Loads the tokenizer and a sample of the training data,
-    then prints a detailed analysis of how the data is structured and tokenized.
-    """
-    tokenizer_path = "data/tokenizer"
-    data_path = "data/training_data.npy"
-
-    # Load the tokenizer
-    tokenizer = BpeTokenizer()
-    try:
-        tokenizer.load(tokenizer_path)
-    except FileNotFoundError:
-        print(f"Error: Tokenizer file not found at '{tokenizer_path}'")
-        return
-    except Exception as e:
-        print(f"Error loading tokenizer: {e}")
-        return
-
-    # Load a sample of the training data
-    try:
-        token_ids = np.load(data_path)
-        sample_token_ids = token_ids[:200]  # Take the first 200 tokens
-    except FileNotFoundError:
-        print(f"Error: Training data file not found at '{data_path}'")
-        return
-    except Exception as e:
-        print(f"Error reading data: {e}")
-        return
-
-    # Decode the sample
-    sample_text = tokenizer.decode(sample_token_ids.tolist())
-    decoded_tokens = [tokenizer.decode([token_id]) for token_id in sample_token_ids]
-
-    # Print the analysis
-    print("--- Data Inspection ---")
-    print(f"Tokenizer: {tokenizer_path}")
-    print(f"Data sample: {data_path}")
-    print("-" * 20)
-    print(f"Vocabulary size: {len(tokenizer.vcab2id)}")
-    special_tokens_decoded = [st.decode("utf-8", errors="ignore") for st in tokenizer.special_tokens]
-    print(f"Special tokens: {special_tokens_decoded}")
-    if special_tokens_decoded:
-        endoftext_token = special_tokens_decoded[0]
-        endoftext_id = tokenizer.vcab2id[tokenizer.special_tokens[0]]
-        print(f"The ID for '{endoftext_token}' is: {endoftext_id}")
-
-    print("-" * 20)
-    print("Sample Token IDs:")
-    print(sample_token_ids)
-    print("-" * 20)
-    print("Decoded Text:")
-    print(sample_text)
-    print("-" * 20)
-    print("Decoded Tokens (one by one):")
-    print(decoded_tokens)
-    print("--- End of Inspection ---")
 
 
 if __name__ == "__main__":
