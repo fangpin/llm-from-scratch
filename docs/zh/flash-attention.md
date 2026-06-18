@@ -17,296 +17,215 @@ sourceDocs:
 
 # Flash Attention 与 Kernel 优化
 
-你是否好奇大型语言模型如何在有限的硬件资源下处理更长的序列？这一章围绕当前仓库里的 `kernel/` 目录，解释 Triton 版本 Flash Attention 的实现方式，以及它为什么是项目里最重要的 kernel 优化路径。
+`kernel/` 是仓库里的实验性性能层。这里的 Flash Attention 实现是真实可跑、可 benchmark 的，但它目前还没有接到默认的 `llm/transformer.py` 主路径里。所以这一章讲的是一个独立可复用 kernel，而不是“预训练默认已经启用的加速路径”。
 
-在大型语言模型（LLM）的训练和推理过程中，注意力机制通常是计算和内存瓶颈。为了优化这一核心组件，仓库在 `kernel/` 中实现了基于 Triton 的 Flash Attention，并配套提供了 reference 版本与 benchmark 脚本。
+## 职责边界
 
-## kernel 目录结构
+这一层被拆成三类文件：
 
-让我们首先了解 `kernel` 目录的整体结构：
+- `kernel/flash_attention_triton.py`：Triton 前向 kernel 与 autograd 包装器
+- `kernel/flash_attention_mock.py`：更易读的 PyTorch 参考实现
+- `bench_mark/`：独立的性能测量脚本
 
-```
-kernel/
-├── __init__.py
-├── bench_mark/
-│   ├── __init__.py
-│   ├── bench_mark_atten.py
-│   ├── bench_mark_atten_jit.py
-│   ├── bench_mark_flash_attention.py
-│   └── bench_mark_model.py
-├── flash_attention_mock.py
-└── flash_attention_triton.py
-```
+这样优化实现、参考实现和 benchmark 可以分别演进，不会混成一个难维护的大文件。
 
-该目录包含两个主要部分：
-- 核心实现文件：`flash_attention_triton.py`（Triton优化版本）和 `flash_attention_mock.py`（PyTorch参考实现）
-- 性能基准测试套件：`bench_mark` 目录下的一系列性能测试脚本
+## 为什么需要 Flash Attention
 
-## Flash Attention 原理解析
+朴素 self-attention 往往会显式构造至少一个形状为 `[batch, query_len, key_len]` 的 score 矩阵，softmax 后还可能再产生一个同样大小的概率矩阵。因此：
 
-Flash Attention 是一种高效的注意力计算算法，通过分块计算和内存优化，显著减少了注意力机制中的内存占用和读写次数。
+- 临时显存开销随序列长度平方增长
+- 带宽浪费在大矩阵读写上
+- 长上下文下 attention 很快变成瓶颈
 
-### 传统注意力计算的瓶颈
+Flash Attention 通过改变执行顺序来解决这个问题：
 
-传统的自注意力计算需要存储中间矩阵 S（形状为 [batch_size, seq_len, seq_len]）和 P（经过 softmax 后的 S），这导致内存使用量与序列长度的平方成正比，成为长序列处理的主要瓶颈。
+1. 先把一个 query tile 留在片上
+2. 逐块扫描 key/value tile
+3. 维护 running softmax 统计量
+4. 直接累计输出 tile
+5. 避免显式保存完整 attention matrix
 
-### Triton 实现核心：分块计算
+真正关键的不是“分块”本身，而是“分块时仍然保证 softmax 归一化正确”。
 
-`flash_attention_triton.py` 中的实现核心是 `flash_attention_forward_kernel` 函数，让我们深入分析其工作原理：
+## 对外接口
+
+Triton 路径通过一个 `torch.autograd.Function` 暴露：
 
 ```python
-@triton.jit
-def flash_attention_forward_kernel(
-    q, k, v, o, l,
-    # 各种步长参数
-    stride_qb, stride_qn, stride_qd,
-    # ...
-    n: tl.int32, d_scale: tl.float32,
-    IS_CAUSAL: tl.constexpr,
-    BQ: tl.constexpr, BK: tl.constexpr,
-    D: tl.constexpr, eps: tl.constexpr,
-):
-    # 获取程序ID，用于并行计算
-    pid_b = tl.program_id(0)  # 批次维度
-    pid_tq = tl.program_id(1)  # 查询分块维度
-    
-    # 创建块指针，用于高效内存访问
-    q_block_ptr = tl.make_block_ptr(
-        base=q + pid_b * stride_qb,
-        shape=(n, D),
-        strides=(stride_qn, stride_qd),
-        offsets=(pid_tq * BQ, 0),
-        block_shape=(BQ, D),
-        order=(1, 0),
-    )
-    # ... 类似地创建 k_block_ptr, v_block_ptr, o_block_ptr
-    
-    # 初始化累加器
-    m_i = tl.full([BQ], value=float("-inf"), dtype=tl.float32)
-    l_i = tl.zeros([BQ], dtype=tl.float32)
-    o_i = tl.zeros([BQ, D], dtype=tl.float32)
-    
-    # 加载查询块并缩放
-    q_i = tl.load(q_block_ptr, boundary_check=(0, 1))
-    q_i *= d_scale
-    
-    # 计算循环结束条件，因果模式下有特殊处理
-    loop_end = tl.cdiv(n, BK)
-    if IS_CAUSAL:
-        loop_end = tl.cdiv((pid_tq + 1) * BQ, BK)
-    
-    # 核心循环：处理所有键值对块
-    for j in range(loop_end):
-        # 加载键和值块
-        k_j = tl.load(k_block_ptr, boundary_check=(0, 1))
-        v_j = tl.load(v_block_ptr, boundary_check=(0, 1))
-        
-        # 计算注意力分数
-        s_ij = tl.dot(q_i, k_j)
-        
-        # 因果掩码处理
-        if IS_CAUSAL:
-            offs_q = pid_tq * BQ + tl.arange(0, BQ)
-            offs_k = j * BK + tl.arange(0, BK)
-            s_ij += tl.where(offs_q[:, None] >= offs_k[None, :], 0, float("-inf"))
-        
-        # 对数空间累加，避免数值不稳定性
-        m_new = tl.maximum(m_i, tl.max(s_ij, axis=1))
-        scale = tl.exp(m_i - m_new)
-        p_ij = tl.exp(s_ij - m_new[:, None])
-        
-        l_new = scale * l_i + tl.sum(p_ij, axis=1)
-        o_i = scale[:, None] * o_i + tl.dot(p_ij.to(v_j.dtype), v_j)
-        
-        # 更新累加器
-        l_i = l_new
-        m_i = m_new
-        
-        # 移动到下一个键值块
-        k_block_ptr = tl.advance(k_block_ptr, (0, BK))
-        v_block_ptr = tl.advance(v_block_ptr, (BK, 0))
-    
-    # 归一化输出
-    o_i /= l_i[:, None]
-    l_i = m_i + tl.log(l_i + eps)
-    
-    # 存储结果
-    tl.store(o_block_ptr, o_i.to(o.dtype.element_ty), boundary_check=(0, 1))
-    tl.store(l_ptrs, l_i, mask=(pid_tq * BQ + tl.arange(0, BQ)) < n)
+FlashAttention.apply(q, k, v, is_causal=False)
 ```
 
-### 核心技术亮点
+当前接口要求 `q`、`k`、`v` 的形状是 `[b, n, d]`。它不负责投影、不负责多头拆分、也不负责 RoPE。这些步骤必须由上游先完成。
 
-1. **分块计算策略**
-   - 将查询、键、值矩阵分成固定大小的块（BQ × D 和 D × BK）
-   - 逐个处理键值对块，避免一次性加载整个矩阵
-   - 这种方法将内存复杂度从 O(n²) 降低到 O(n√n)
+## Triton 前向 Kernel
 
-2. **内存访问优化**
-   - 使用 Triton 的块指针（`make_block_ptr`）实现高效的内存访问模式
-   - 通过 `advance` 方法高效地移动到下一个数据块
-   - 利用向量化指令处理多个元素
-
-3. **数值稳定性优化**
-   - 使用对数空间累加技术（`m_i` 和 `l_i` 变量）
-   - 通过减去最大值（`m_new`）避免指数运算中的数值溢出
-   - 使用 `tl.logsumexp` 类似的计算方式
-
-4. **条件计算**
-   - 支持因果注意力模式，通过条件判断避免不必要的计算
-   - 自适应循环结束条件，根据是否因果模式动态调整
-
-## PyTorch 参考实现
-
-`flash_attention_mock.py` 提供了一个基于 PyTorch 的 Flash Attention 实现，用于验证 Triton 实现的正确性和提供一个无 Triton 依赖的备选方案。其核心思想与 Triton 版本一致，但在实现细节上有所不同：
+核心实现是 `flash_attention_forward_kernel`。launch grid 为：
 
 ```python
-# 分块处理的核心循环
-for i in range(tq):
-    start_q, end_q = i * bq, min((i + 1) * bq, n)
-    q_i = q[:, start_q:end_q]  # [batch_size, bq, d]
-    
-    o_i = torch.zeros((batch_size, end_q - start_q, d), device=q.device)
-    l_i = torch.zeros((batch_size, end_q - start_q), device=q.device)
-    m_i = torch.full((batch_size, end_q - start_q), float("-inf"), device=q.device)
-    
-    for j in range(tk):
-        start_k, end_k = j * bk, min((j + 1) * bk, n)
-        k_j = k[:, start_k:end_k]  # [batch_size, bk, d]
-        v_j = v[:, start_k:end_k]  # [batch_size, bk, d]
-        
-        # 计算注意力分数并更新累加器
-        s_ij = einx.dot("b bq d, b bk d -> b bq bk", q_i, k_j) / math.sqrt(d)
-        # ... 类似Triton版本的累加计算
+grid = (b, triton.cdiv(n, BQ))
 ```
 
-## 性能基准测试系统
+这意味着每个 Triton program instance 负责：
 
-`bench_mark` 目录提供了一套完整的性能测试工具，用于评估不同注意力实现的性能特点。
+- 一个 batch 元素，由 `pid_b` 指定
+- 一个 query tile，由 `pid_tq` 指定
 
-### 1. 基础注意力性能测试
+### block pointer 与内存布局
 
-`bench_mark_atten.py` 测试了标准的 `ScaledDotProductAttention` 实现性能：
+kernel 使用 `tl.make_block_ptr()` 明确描述 tile 的读写方式：
+
+- `q_block_ptr`：读取 `[BQ, D]` 的 query tile
+- `k_block_ptr`：把 key 看成 `[D, BK]`，这样 `tl.dot(q_i, k_j)` 直接得到 `[BQ, BK]`
+- `v_block_ptr`：读取 `[BK, D]` 的 value tile
+- `o_block_ptr`：写回 `[BQ, D]` 的输出 tile
+
+这正是 Triton 存在的意义：代码显式控制 tile 形状、stride 和 pointer 的推进方式。
+
+### running softmax 状态
+
+在 key/value 循环开始前，kernel 会为每个 query row 初始化三类累加器：
 
 ```python
-def benchmark_attention_each(
-    d_model: int, seq_len: int, dtype,
-    batch_size=64, warmup_iters=10, steps=100, jit=False, device="cuda"
-):
-    # 初始化模型和数据
-    atten = ScaledDotProductAttention().to(device)
-    if jit:  # 支持JIT编译优化
-        atten = torch.compile(atten)
-    q, k, v = [torch.randn((batch_size, seq_len, d_model), dtype=dtype, device="cuda") for _ in range(3)]
-    
-    # 预热
-    for _ in range(warmup_iters):
-        _ = atten(q, k, v)
-    torch.cuda.synchronize()
-    
-    # 测量时间
-    start = timeit.default_timer()
-    for _ in range(steps):
-        with torch.no_grad():
-            _ = atten(q, k, v)
-    torch.cuda.synchronize()
-    end = timeit.default_timer()
-    
-    # 输出结果
-    print(f"dtype: {str(dtype):10}, d_model: {d_model:6}, seq_len: {seq_len:6}: "
-          f"Time per iteration: {(end - start) * 1000 / steps:.3f} ms")
+m_i = tl.full([BQ], value=float("-inf"), dtype=tl.float32)
+l_i = tl.zeros([BQ], dtype=tl.float32)
+o_i = tl.zeros([BQ, D], dtype=tl.float32)
 ```
 
-### 2. Flash Attention 对比测试
+它们的含义分别是：
 
-`bench_mark_flash_attention.py` 直接对比了 Flash Attention 和原始注意力机制的性能差异：
+- `m_i`：当前为止的行最大 attention score
+- `l_i`：shift 后 softmax 分母的累计值
+- `o_i`：当前输出累计值
+
+在 tile 循环内，每个 key/value 块都会按标准 Flash Attention 递推更新：
 
 ```python
-def bench_mark_flash_attention():
-    # 测试多种配置组合
-    for dtype in [torch.float32, torch.bfloat16]:
-        for d_model in [16, 32, 64, 128]:
-            for seq_len in [256, 1024, 4096]:
-                for batch_size in [1, 64]:
-                    # 创建测试数据
-                    q, k, v = [torch.randn((batch_size, seq_len, d_model), dtype=dtype, device="cuda") for _ in range(3)]
-                    
-                    # 测试Flash Attention性能
-                    def fn(): return bench_mark_flash_attention_each(q, k, v)
-                    val = triton.testing.do_bench(fn)
-                    print(f"Flash_attention dtype: {str(dtype):10}, batch_size: {batch_size:6}, d_model: {d_model:6}, seq_len: {seq_len:6}: mean latency {val:.3f} ms")
-                    
-                    # 测试原始Attention性能
-                    def fn2(): return benchmark_attention_each(q, k, v)
-                    val = triton.testing.do_bench(fn2)
-                    print(f"Original_attention dtype: {str(dtype):10}, batch_size: {batch_size:6}, d_model: {d_model:6}, seq_len: {seq_len:6}: mean latency {val:.3f} ms")
+m_new = tl.maximum(m_i, tl.max(s_ij, axis=1))
+scale = tl.exp(m_i - m_new)
+p_ij = tl.exp(s_ij - m_new[:, None])
+
+l_new = scale * l_i + tl.sum(p_ij, axis=1)
+o_i = scale[:, None] * o_i + tl.dot(p_ij.to(v_j.dtype), v_j)
 ```
 
-### 3. 全模型性能测试
+这就是整个文件最核心的数学部分。kernel 从来不需要把全局概率矩阵存下来，只保留足够重建最终归一化结果的统计量。
 
-`bench_mark_model.py` 提供了更全面的模型性能测试，支持内存分析：
+### causal mask
+
+如果 `IS_CAUSAL` 为真，kernel 会同时在两个层面减少工作量。
+
+第一，缩短 tile 循环终点：
 
 ```python
-def benchmark(
-    d_model: int, num_heads: int, d_ff: int, vocab_size: int,
-    num_layers: int, batch_size: int, seq_len: int, 
-    warmup_steps: int, forward_only: bool, device: str, 
-    dtype: torch.dtype, memory_profile_path: str, steps=100
-):
-    # 创建完整的Transformer模型
-    model = Transformer(
-        d_model=d_model, num_heads=num_heads, d_ff=d_ff,
-        vocab_size=vocab_size, num_layers=num_layers,
-        max_seq_len=seq_len, rope_theta=10000,
-        device=device, dtype=dtype,
-    )
-    
-    # 内存分析
-    torch.cuda.memory._record_memory_history("all")
-    # ... 性能测试代码 ...
-    torch.cuda.memory._dump_snapshot(memory_profile_path)
-    # 生成的内存快照可通过 https://pytorch.org/memory_viz 可视化分析
+loop_end = tl.cdiv((pid_tq + 1) * BQ, BK)
 ```
 
-## 性能优化效果分析
+这样当前 query tile 不会去扫描完全位于未来的 key tile。
 
-通过分析 `bench_mark_flash_attention.py` 的测试结果，我们可以观察到 Flash Attention 在不同配置下的性能优势：
+第二，在当前可见 tile 内做局部 mask：
 
-1. **长序列优势明显**：随着序列长度增加（如从256到4096），Flash Attention 的性能提升更为显著，这是因为它避免了 O(n²) 的内存占用
+```python
+offs_q = pid_tq * BQ + tl.arange(0, BQ)
+offs_k = j * BK + tl.arange(0, BK)
+s_ij += tl.where(offs_q[:, None] >= offs_k[None, :], 0, float("-inf"))
+```
 
-2. **批量大小影响**：在小批量情况下，Flash Attention 的优势可能不如大批量明显，但仍然存在
+因此 causal 约束是在 tile 级别完成的，而不是先分配一整张全局 mask。
 
-3. **低精度加速**：在使用 bfloat16 等低精度数据类型时，Flash Attention 可以获得更高的性能提升
+### 输出与保存状态
 
-4. **维度适应性**：对于不同的模型维度（d_model），Flash Attention 都能提供一致的性能改进
+循环结束后，kernel 最终做：
 
-## 代码优化建议
+```python
+o_i /= l_i[:, None]
+l_i = m_i + tl.log(l_i + eps)
+```
 
-在分析完 `kernel` 目录的实现后，我发现几个可能的优化点：
+其中：
 
-**动态块大小选择**：
-   ```python
-   # 当前实现中块大小是固定的
-   BQ = 64
-   BK = 64
-   
-   # 优化建议：根据硬件特性和输入规模动态选择块大小
-   def get_optimal_block_size(device, d_model):
-       # 根据GPU架构和缓存大小选择最优块大小
-       if device == 'cuda' and torch.cuda.get_device_capability()[0] >= 8:
-           return 128 if d_model <= 64 else 64
-       else:
-           return 64
-   
-   BQ = BK = get_optimal_block_size(q.device, d)
-   ```
+- `o_i` 是最终输出 tile
+- `l` buffer 保存的是每一行的 log-sum-exp 统计量
 
+前向结束时，`q`、`k`、`v`、`l`、`o` 都会被存进 autograd context，供 backward 使用。
 
-## 总结
+## Autograd 包装与反向传播
 
-[llm-from-scratch](https://github.com/fangpin/llm-from-scratch) 仓库中的 `kernel` 目录提供了一套高效的 LLM 性能优化实现，特别是基于 Triton 的 Flash Attention 实现，通过巧妙的分块计算和内存优化策略，显著提升了注意力机制的性能和内存效率。
+`FlashAttention` 是 `torch.autograd.Function` 的子类。前向走 Triton，但反向没有继续写 Triton kernel，而是调用：
 
-这种优化对于训练和部署大型语言模型至关重要，特别是在处理长序列输入时。同时，完整的性能测试套件允许开发者在不同硬件和配置下评估优化效果，为实际应用提供指导。
+```python
+_flash_attn_backward_compiled(...)
+```
 
-如果你对 LLM 性能优化感兴趣，或者想深入了解 Flash Attention 的实现细节，我强烈推荐你访问 [llm-from-scratch](https://github.com/fangpin/llm-from-scratch) 仓库，亲自体验这些优化技术。
-        
+这个 helper 用 `@torch.compile` 包装，内部仍然是 PyTorch 密集实现。它会：
+
+1. 重建 `s = qk^T * scale`
+2. 如果需要，应用 causal mask
+3. 重建 `p = softmax(s)`
+4. 计算 `dv`、`dp`、`ds`、`dq`、`dk`
+
+所以当前优化边界是：
+
+- 前向：Triton
+- 反向：compiled PyTorch
+
+这是个很实用的折中：前向演示了真正的 memory-saving kernel，而 backward 仍然保持可读和可调试。
+
+## 参考实现：`flash_attention_mock.py`
+
+`FlashAttentionMock` 是同一思想的可读版实现。它的前向流程是：
+
+- 先用 `einx.rearrange("... n d -> (...) n d", q)` 展平 batch/head 前缀
+- 在 Python 层双重循环遍历 query block 与 key block
+- 用普通 PyTorch tensor 维护 `m_i`、`l_i`、`o_i`
+- 最后再 reshape 回原始前缀形状
+
+这个文件还提供了 `naive=True` 分支，直接做密集 attention。它的价值主要有三点：
+
+- 在看 Triton 之前先理解 blockwise recurrence
+- 做数值正确性对照
+- 不依赖 Triton 也能跑通测试
+
+## Benchmark 面
+
+这一章配套两类 benchmark 入口。
+
+### `bench_mark/bench_mark_flash_attention.py`
+
+这个脚本会在不同组合上直接比较 Flash Attention kernel 与基线 attention：
+
+- `dtype`
+- `d_model`
+- `seq_len`
+- `batch_size`
+
+它回答的是一个很窄但很重要的问题：在这些张量形状下，独立 kernel 比独立 baseline 快多少。
+
+### `bench_mark/bench_mark_atten.py`
+
+这个文件 benchmark 的是 `llm/transformer.py` 里的 `ScaledDotProductAttention`，并且可选开启 `torch.compile`。它提供了“普通 PyTorch attention”的基线。
+
+## 和仓库其他部分的关系
+
+目前 Flash Attention 还没有接到：
+
+- `MultiHeadAttention`
+- `MultiHeadAttentionWithRoPE`
+- `llm/training.py`
+
+默认模型路径仍然使用 `llm/transformer.py` 里那套更易读的 attention 实现。这样做的好处是：
+
+- 端到端预训练路径仍然容易理解
+- kernel 实验可以独立成熟
+
+如果将来要集成，最自然的接点是在 `MultiHeadAttentionWithRoPE` 里，投影出 `q`、`k`、`v` 并应用 RoPE 之后。
+
+## 当前实现的取舍
+
+这条 kernel 路径目前有几项明确取舍：
+
+- block size 固定为 `BQ=64`、`BK=64`
+- 对外接口假设输入已经完成投影
+- backward 用的是密集 PyTorch，而非 Triton
+- 主模型还未集成这条 kernel
+
+这些取舍和仓库目标是匹配的：重点不是交付一套完整生产 kernel 栈，而是用可运行代码把 Flash Attention 的数值技巧和内存布局讲清楚。

@@ -18,311 +18,304 @@ sourceDocs:
 
 # gsm8k 上的强化学习微调
 
-> 一文吃透：不依赖成熟 RL 库，如何在 `alignment` 目录用 REINFORCE、REINFORCE-baseline 与 GRPO 细节化实现数理推理模型的强化学习微调，并实现训练/参考/采样模型的多卡调度。
+RLFT 路径沿用了同一个 GSM8K 任务，也沿用了同一套 `<think> / <answer>` 输出契约，但把监督式 next-token 训练换成了策略梯度更新。这里重点讲当前代码的真实实现：多角色模型放置、group 奖励归一化、response-only masking，以及 `alignment/grpo.py` 里究竟实现了哪些 loss 变体。
 
-## 引言
+## 文件级职责
 
-你是否也遇到过：模型“会思考”，但少数题正确，格式还常常不合规？我在 Qwen/Qwen2.5-Math-1.5B 上亲历这一痛点——zero-shot 在 GSM8K 只有约 1%。本文分享我如何仅用本仓库的 `alignment` 代码，从零实现 REINFORCE、带基线的 REINFORCE 与 GRPO，把准确率稳定拉升到 63.4%，并把训练策略模型、参考模型与采样模型拆到不同 GPU 上高效协同。
+RL 工作流被拆成几份文件：
 
-读完你将掌握：奖励设计与计算、方差降低的工程化做法、GRPO 的分组偏好更新与裁剪、以及一套可复现的多卡调度与评估 pipeline。
+- `alignment/train_rl.py`：主调度与训练循环
+- `alignment/grpo.py`：奖励归一化与策略梯度 loss
+- `alignment/drgrpo_grader.py`：格式与数学答案 reward
+- `alignment/evaluate.py`：批量评估
+- `alignment/args.py`：CLI 默认参数
 
----
+数据集与 prompt 模板沿用 SFT 路径，所以 RL 与 SFT 在任务定义和输出结构上完全一致。
 
-## 目录
-- 问题与目标
-- 奖励与格式：如何让“会思考”的模型也“答得对、写得规矩”
-- 算法与实现：REINFORCE、REINFORCE-baseline、GRPO（含代码片段）
-- 多卡调度：采样/参考/评估/训练的设备分工与数据流（含 Mermaid 图）
-- 动手复现：数据获取与 uv 入口命令
-- 算法对比速查表
-- 结论与行动
+## 入口与初始 checkpoint
 
----
+`train_rl.py` 的 `__main__` 会同时解析 RL 参数和 SFT 参数。
 
-## 问题与目标
-
-- 问题：zero-shot 推理准确率极低（~1%），且格式不稳定，难以可靠评估与训练。
-- 目标：设计严格且高召回的奖励函数，配合从零实现的策略梯度与 GRPO，逐步把 Qwen2.5-Math-1.5B 在 GSM8K 的 zero-shot 准确率提升到 63.4%。
-
-我只在必要处简述 SFT，上文已分析过；本文将把重点落在强化学习微调（RLFT）的训练循环与实现细节。
-
----
-
-## 奖励与格式：答案正确 + 格式遵循的双指标
-
-本仓库采用 R1 风格的格式约束与数学习题的严格判定。核心在 `alignment/drgrpo_grader.py` 的 `r1_zero_reward_fn`：
-
-- 格式要求：必须出现 `</think> <answer>` 与 `</answer>`。不合格式直接奖励为 0。
-- 答案正确：借助多种规范化与符号等价检查（含 LaTeX 解析、Sympy 简化、数值近似），保障较高召回率。
-- 组合奖励：`format_reward` 与 `answer_reward` 都满足则总奖励 `reward=1`，否则为 0。评估脚本会统计三者的平均值。
-
-代码摘录（路径与作用标注）：
-
-- 文件：`llm-from-scratch/alignment/drgrpo_grader.py`
-- 作用：计算 GSM8K 的格式与正确性奖励
+这不是偶然的，因为当 RL checkpoint 不存在时，脚本会使用：
 
 ```python
-def r1_zero_reward_fn(response, ground_truth, fast=True):
-    # We are strict about format to evaluate our models.
-    if "</think> <answer>" in response and "</answer>" in response:
-        model_answer = response.split("<answer>")[-1].replace("</answer>", "")
-        if "\\boxed" in model_answer:
-            model_answer = extract_answer(model_answer)
-            if model_answer is None:
-                return {"format_reward": 1.0, "answer_reward": 0.0, "reward": 0.0}
-        # 严格的数学等价判断（字符串规范化、Sympy、可选 math_verify）
-        is_correct = grade(model_answer, str(ground_truth), fast)
-        if is_correct:
-            return {"format_reward": 1.0, "answer_reward": 1.0, "reward": 1.0}
-        else:
-            # 格式正确但答案错：不给格式奖励以避免投机
-            return {"format_reward": 1.0, "answer_reward": 0.0, "reward": 0.0}
-    else:
-        # 未按格式输出
-        return {"format_reward": 0.0, "answer_reward": 0.0, "reward": 0.0}
+sft_args.checkpoint_path
 ```
 
-在评估侧，`alignment/evaluate.py` 的 `evaluate_vllm` 会将 `avg_format_rewards`、`avg_answer_rewards` 与 `avg_all_rewards` 打印出来，其中 `avg_all_rewards` 近似于最终的准确率。
+作为 base policy checkpoint。
 
----
+入口控制逻辑是：
 
-## 算法与实现：REINFORCE、REINFORCE-baseline、GRPO
+- 如果 `args.checkpoint_path` 已经包含权重文件，就跳过训练，直接评估 RL checkpoint
+- 否则，从 SFT checkpoint 开始做 RL 训练
 
-### 1) 分组优势（baseline）与方差降低
+所以这套 RLFT 代码本质上是建立在 SFT 之后的 post-training 阶段，而不是直接从原始 Hugging Face base model 起步。
 
-- 分组思想：针对每道题的一个 prompt，我们采样 `group_size` 个响应；每组共享同一 ground truth。
-- 优势计算：先把每组的 `reward` 减去组内均值（可选再除以组内标准差），得到“相对优势”。这就是 REINFORCE-baseline 在本代码中的实现思想。
+## 多角色设备拓扑
 
-代码摘录：
+`train_rl.py` 把不同职责拆到不同设备上：
 
-- 文件：`llm-from-scratch/alignment/grpo.py`
-- 作用：把原始奖励转换为分组归一化优势（baseline）
+- `sample_model`：vLLM rollout 生成
+- `reference_model`：冻结的 log-prob 参考模型
+- `eval_model`：周期性评估
+- `model`：可训练 policy
+
+CLI 默认值是：
+
+- `sample_device = cuda:7`
+- `reference_model_device = cuda:6`
+- `eval_device = cuda:5`
+
+剩下的 GPU 再交给 `partition_model_across_devices(args)` 去承载可训练 policy。
+
+### `partition_model_across_devices()` 的工作方式
+
+这个函数会：
+
+1. 读取总 GPU 数
+2. 从中移除 sampling、reference、evaluation 所占的卡
+3. 取剩余第一张卡作为 `main_gpu`
+4. 把 `model.embed_tokens`、`lm_head`、`model.norm` 放到 `main_gpu`
+5. 把 transformer layer 均匀摊到其余 policy GPU 上
+
+layer 分配规则是：
 
 ```python
-def compute_group_normalized_rewards(
-    reward_fn, rollout_responses, repeated_ground_truths,
-    group_size, advantage_eps, normalize_by_std=True,
-):
-    # 逐个样本计算原始 reward
-    rewards = [reward_fn(resp, gt) for resp, gt in zip(rollout_responses, repeated_ground_truths)]
-    raw_rewards = torch.tensor([r["reward"] for r in rewards], dtype=torch.float32)
-
-    # 折叠成 [n_prompts, group_size]
-    advantages = raw_rewards.view(-1, group_size)
-
-    # 基线：减去组均值（可选再除以组内 std）
-    mean_advantages = einx.mean("n_prompts group_size -> n_prompts 1", advantages)
-    advantages = advantages - mean_advantages
-    if normalize_by_std:
-        std_advantages = torch.std(advantages, dim=1, unbiased=True, keepdim=True)
-        advantages = advantages / (std_advantages + advantage_eps)
-
-    return advantages.view(-1), raw_rewards, {"mean_advantages": mean_advantages}
+layers_per_gpu = math.ceil(num_layers / len(layer_gpus))
 ```
 
-这里的“分组减均值”就是减少方差的经典做法：在一个小团队中，我们只关注“比团队平均更好/更差”的相对表现，从而让梯度更稳定。
+然后按层号顺序依次分配。
 
-一个生动类比：
-- 想象一队球员在同一场馆、同一光照下投篮，每人投 10 球。当天的“场馆状态”可能会让所有人整体发挥偏高或偏低。如果我们用“每个球员的命中率减去团队平均命中率”来评价个人表现，这样就抵消了当天环境的整体波动。这就是 baseline 的直觉来源。
+因此当前实现默认面向一台 GPU 数足够多的本地机器，能同时容纳 rollout、reference、eval 与 training 四种角色。
 
-### 2) 三种损失的并行实现选择
+## 初始化路径
 
-在本仓库里，三种损失类型通过统一的入口 `compute_policy_gradient_loss` 分发：
+在 `train(args, base_model_checkpoint_path)` 里，主要运行时对象按这个顺序构造：
 
-- `no_baseline`: 纯 REINFORCE，用原始 `reward` 直接乘 `log_prob`；
-- `reinforce_with_baseline`: 带基线的 REINFORCE，用 `advantages` 乘 `log_prob`；
-- `grpo_clip`: GRPO 风格裁剪，计算 `policy_log_probs - old_log_probs` 的比率，并按 `cliprange` 做截断。
+1. `SummaryWriter`
+2. 从 `base_model_checkpoint_path` 初始化的 vLLM `sample_model`
+3. 从 `args.model` 初始化 tokenizer
+4. 从 `base_model_checkpoint_path` 初始化的可训练 Hugging Face policy model
+5. 从 `base_model_checkpoint_path` 初始化的冻结 `reference_model`
+6. `Gsm8kDataset` 与 `DataLoader`
+7. `torch.optim.AdamW`
 
-代码摘录：
+所以 rollout engine、reference model 与 trainable policy 一开始都来自同一个 checkpoint。
 
-- 文件：`llm-from-scratch/alignment/grpo.py`
-- 作用：三种损失的核心分发逻辑（对应三种算法）
+## 每步数据流
+
+`DataLoader` 每次给出：
+
+- `prompts`
+- 监督 completion，这里在 RL 模式下不会使用
+- `ground_truths`
+
+代码会把每个 prompt 重复 `group_size` 次：
 
 ```python
-def compute_policy_gradient_loss(
-    policy_log_probs, loss_type,
-    raw_rewards=None, advantages=None,
-    old_log_probs=None, cliprange=None,
-):
-    if loss_type == "no_baseline":
-        # 纯 REINFORCE
-        per_token_loss = compute_naive_policy_gradient_loss(
-            raw_rewards, policy_log_probs
-        )
-        meta = {}
-    elif loss_type == "reinforce_with_baseline":
-        # REINFORCE + baseline（方差更低）
-        per_token_loss = compute_naive_policy_gradient_loss(
-            advantages, policy_log_probs
-        )
-        meta = {}
-    else:  # grpo_clip
-        # GRPO 的裁剪型偏好优化（近似 PPO 风格）
-        assert advantages is not None and old_log_probs is not None and cliprange is not None
-        per_token_loss, meta = compute_grpo_clip_loss(
-            advantages, policy_log_probs, old_log_probs, cliprange
-        )
-
-    return per_token_loss, meta
+grouped_prompts = [p for p in prompts for _ in range(group_size)]
+grouped_ground_truths = [gt for gt in ground_truths for _ in range(group_size)]
 ```
 
-> 注意：本实现对 REINFORCE 与带基线的 REINFORCE 以“逐 token 的 log_prob 乘以标量优势/奖励”的统一形式实现；GRPO 则引入参考策略的 `old_log_probs` 与裁剪，避免策略更新过激。
+如果 `loss_type == "no_baseline"`，代码会强制把 `group_size` 设成 `1`；否则就使用配置里的 group size。
 
-### 3) 训练微批与掩码：只在响应段回传梯度
+## rollout 生成
 
-强化学习微调中，我们只希望对模型的“响应段”进行优化，而不是把 prompt 也算进损失。`grpo_microbatch_train_step` 通过 `response_mask` 做掩码平均，并在梯度累积场景下自动缩放 loss。
+rollout 由 vLLM 负责，采样参数包括：
 
-代码摘录：
+- `temperature = args.sampling_temperature`
+- `top_p = args.sampling_top_p`
+- `min_tokens = args.sampling_min_tokens`
+- `max_tokens = args.sampling_max_tokens`
+- `stop = ["</answer>"]`
+- `repetition_penalty = 1.1`
+- `include_stop_str_in_output = True`
 
-- 文件：`llm-from-scratch/alignment/train_rl.py`
-- 作用：构建只在响应部分为 True 的掩码
+拿到 response text 后，脚本会把它和 prompt 拼回成 `full_texts`。
+
+因此后续 policy-gradient 部分其实是在“完整 prompt + response token 序列”上工作，只是稍后再把 prompt 区域 mask 掉。
+
+## reward 计算与 group normalization
+
+reward function 仍然是 `r1_zero_reward_fn`，所以 RL 和 SFT 共享完全相同的成功定义：
+
+- 格式合法
+- 最终答案正确
+
+`alignment/grpo.py` 中的 `compute_group_normalized_rewards()` 则把原始 reward 变成 advantage。
+
+它的执行逻辑是：
+
+1. 逐条 rollout 计算标量 raw reward
+2. reshape 成 `[n_prompts, group_size]`
+3. 减去组内均值
+4. 可选地再除以组内标准差
+5. 最后 flatten 回一维
+
+所以 baseline 不是全局 batch 级的，而是“同一个 prompt 采样出的多条 response”这一小组内部的局部 baseline。
+
+## tokenization 与 response mask
+
+脚本会分别 tokenizer：
+
+- grouped prompt
+- 完整的 prompt + response
+
+prompt 长度来自 prompt attention mask，而不是字符长度。对每个 microbatch，response mask 的构造方式是：
 
 ```python
-# --- Response Mask for Microbatch ---
-response_mask = torch.zeros_like(mb_input_ids, dtype=torch.bool)
-for j in range(len(response_mask)):
-    start = mb_prompt_lengths[j].item()
-    # Use attention mask sum for the end to handle padding correctly
-    end_pos = mb_attention_mask[j].sum().item()
-    response_mask[j, start:end_pos] = True
-
-response_mask &= mb_input_ids != tokenizer.pad_token_id
+start = mb_prompt_lengths[j].item()
+end_pos = mb_attention_mask[j].sum().item()
+response_mask[j, start:end_pos] = True
 ```
 
----
+随后再把这些位置中的：
 
-## 多卡调度：采样/参考/评估/训练的设备分工与数据流
+- padding token
+- `eos_token_id`
+- `bos_token_id`
 
-在 `alignment/train_rl.py` 中，我们将四种角色拆到不同设备：
+排除掉。
 
-- vLLM 采样模型：负责 rollout，用 `args.sample_device`（默认 `cuda:7`）
-- 参考模型（旧策略）：冻结、只做 `old_log_probs`，用 `args.reference_model_device`（默认 `cuda:6`）
-- 评估模型：周期性评估，`args.eval_device`（默认 `cuda:5`）
-- 训练政策模型：主力，手动构建 `device_map` 把层均衡分布到剩余 GPU 上
+因此 loss 平均只覆盖 policy 真正生成出来的 response token。
 
-代码摘录（设备映射的关键片段）：
+## log probability 的计算
 
-- 文件：`llm-from-scratch/alignment/train_rl.py`
-- 作用：为策略模型手工构造跨多 GPU 的平衡 `device_map`
+对每个 microbatch，trainable policy 会计算：
 
 ```python
-def partition_model_across_devices(args) -> dict[str, int]:
-    total_gpu_count = torch.cuda.device_count()
-    # 预留采样/参考/评估三张卡
-    sample_device_idx = int(args.sample_device.split(":")[-1])
-    ref_device_idx    = int(args.reference_model_device.split(":")[-1])
-    eval_device_idx   = int(args.eval_device.split(":")[-1])
-    reserved_indices  = {sample_device_idx, ref_device_idx, eval_device_idx}
-    policy_gpu_indices = sorted(list(set(range(total_gpu_count)) - reserved_indices))
-
-    # 主 GPU 放嵌入、lm_head、最终 norm；其余均匀分层
-    main_gpu = policy_gpu_indices[0]
-    layer_gpus = policy_gpu_indices[1:] or [main_gpu]
-    num_layers = AutoConfig.from_pretrained(args.model, trust_remote_code=True).num_hidden_layers
-    layers_per_gpu = math.ceil(num_layers / len(layer_gpus))
-
-    device_map = {
-        "model.embed_tokens": main_gpu,
-        "lm_head": main_gpu,
-        "model.norm": main_gpu,
-    }
-    gpu_idx_for_layers = 0
-    for i in range(num_layers):
-        if i > 0 and i % layers_per_gpu == 0:
-            gpu_idx_for_layers += 1
-        device_map[f"model.layers.{i}"] = layer_gpus[gpu_idx_for_layers]
-    return device_map
+policy_logits = model(...).logits
+policy_log_probs = gather(log_softmax(policy_logits), input_ids)
 ```
 
-把采样/参考/评估与训练策略模型拆分后，训练主循环的数据流大致如下图所示。
+冻结 reference model 会计算：
+
+```python
+old_logits = reference_model(...).logits
+old_log_probs = gather(log_softmax(old_logits), input_ids).detach()
+```
+
+reference forward 在自己的设备上、`torch.inference_mode()` 下执行，然后把 logits 挪回 policy device。
+
+## `alignment/grpo.py` 里的三种 loss
+
+`compute_policy_gradient_loss()` 一共暴露三种模式。
+
+### `no_baseline`
+
+直接用 raw reward：
+
+```python
+- reward * log_prob
+```
+
+这就是最基础的 REINFORCE 形式。
+
+### `reinforce_with_baseline`
+
+把 raw reward 换成 group-normalized advantage：
+
+```python
+- advantage * log_prob
+```
+
+它通过减去组均值来降低方差。
+
+### `grpo_clip`
+
+这是带裁剪的 importance-ratio 目标：
+
+1. 计算 `log_ratio = policy_log_probs - old_log_probs`
+2. 指数化得到 importance ratio
+3. 把 ratio clamp 到 `[1 - cliprange, 1 + cliprange]`
+4. 分别乘 advantage，得到 unclipped 和 clipped 两项
+5. 取负的 `min(...)`
+
+这是仓库里最接近 PPO 风格的目标，但实现仍然保持 token 级、可直接阅读。
+
+## microbatch backward 与梯度累积
+
+`grpo_microbatch_train_step()` 不只是计算 loss，它内部会直接调用 `mean_loss.backward()`。
+
+在 backward 之前，它会：
+
+- 从所选 loss 计算 per-token loss
+- 用 `masked_mean(...)` 在 response token 上做平均
+- 如果需要，再除以 `gradient_accumulation_steps`
+
+`train_rl.py` 通过：
+
+```python
+grad_acc_steps = math.ceil(total_samples / args.train_mini_batch_size)
+```
+
+决定这次 rollout batch 要分成多少个 microbatch。
+
+所有 microbatch 跑完之后，脚本才会：
+
+- `clip_grad_norm_(..., max_norm=1.0)`
+- `optimizer.step()`
+- `optimizer.zero_grad()`
+
+## 周期性评估
+
+每到 `evaluate_freq`，脚本会：
+
+1. 把当前 policy 保存到 `args.tmp_checkpoint_path`
+2. 同时保存 tokenizer
+3. 临时启动一个新的 vLLM `LLM(...)` 做评估
+4. 运行 `evaluate_math(...)`
+5. 把 `score["avg_all_rewards"]` 写到 TensorBoard
+6. 释放临时评估模型
+
+每轮 dataloader 结束后，它还会把 policy 保存到最终 `args.checkpoint_path`。
+
+## 端到端角色拆分
 
 ```mermaid
 flowchart TD
-    subgraph "训练主循环（每步）"
-        direction LR
-        A(["GSM8K 批次"]) --> B(vLLM 采样<br/>cuda:7)
-        B --> C{响应文本<br/>rollouts}
-        C --> D[奖励计算<br/>格式+正确性]
-        D --> E[分组优势<br/>计算 baseline]
-        
-        subgraph "策略与参考模型"
-            direction TB
-            E --> F(策略模型<br/>多卡分层)
-            F --> G{log_probs<br/>新策略}
-            
-            H(参考模型<br/>cuda:6) --> I{old_log_probs<br/>旧策略}
-        end
-        
-        subgraph "损失计算与更新"
-            direction LR
-            G --> J{REINFORCE /<br/>GRPO-clip 损失}
-            I --> J
-            J --> K([反向传播<br/>更新策略模型])
-        end
-    end
-    
-    K --> L{周期性评估<br/>cuda:5}
-
-    classDef startend_style fill:#EAE2FE,stroke:#000000,stroke-width:2px,color:#1f2329
-    classDef process_style fill:#F0F4FC,stroke:#000000,stroke-width:2px,color:#1f2329
-    classDef decision_style fill:#FEF1CE,stroke:#000000,stroke-width:2px,color:#1f2329
-    
-    class A,L startend_style
-    class B,D,E,F,H,J,K process_style
-    class C,G,I decision_style
+    A["gsm8k prompts"] --> B["vLLM rollout model"]
+    B --> C["responses"]
+    C --> D["r1_zero_reward_fn"]
+    D --> E["group-normalized advantages"]
+    E --> F["trainable policy model"]
+    C --> F
+    C --> G["frozen reference model"]
+    F --> H["policy log probs"]
+    G --> I["reference log probs"]
+    H --> J["REINFORCE / GRPO loss"]
+    I --> J
+    J --> K["optimizer step"]
 ```
 
-> 图中“策略模型”在手工平衡的多卡 device_map 上执行；“参考模型”只用于收集旧策略的对数概率；“vLLM 采样”与“评估”各占一张卡，避免与训练冲突。
+## 当前实现边界
 
----
+有几件事如果不看代码很容易误解。
 
-## 动手复现：数据获取与 uv 入口命令
+### rollout sampling 目前不会热更新
 
-请在仓库根目录准备数据集（GSM8K 原始 JSONL）：
+`sample_model` 只在训练开始时从 `base_model_checkpoint_path` 初始化一次，之后训练循环里并不会把最新 policy 权重再同步给 rollout engine。
 
-```bash
-cd dataset
-wget https://raw.githubusercontent.com/openai/grade-school-math/master/grade_school_math/data/train.jsonl
-wget https://raw.githubusercontent.com/openai/grade-school-math/master/grade_school_math/data/test.jsonl
-```
+也就是说，当前 rollout 始终来自起始 checkpoint，除非后续扩展代码。
 
-三步命令跑通评估、SFT 与 RL 微调：
+### reference model 也是固定的
 
-```bash
-uv run -m alignment.evaluate
-uv run -m alignment.sft
-uv run -m alignment.train_rl
-```
+`reference_model` 也只在开始时从起始 checkpoint 初始化一次。代码里虽然留了“周期性更新 old policy”的注释块，但它目前是注释掉的。
 
-- `alignment.evaluate` 会打印 `avg_format_rewards / avg_answer_rewards / avg_all_rewards`，其中 `avg_all_rewards` 即准确率估计。复现实验中，我们从 ~1% 提升到 63.4%。
-- `alignment.sft` 产出 `checkpoints/math_sft`，RL 微调默认以此为底座（见 `train_rl.py` 第 94–125 行）。
-- `alignment.train_rl` 支持三种算法，可通过 `--loss_type` 在 `no_baseline | reinforce_with_baseline | grpo_clip` 间切换；并可用 `--group_size` 控制每题采样个数（默认 4），`--cliprange` 控制 GRPO 裁剪强度（默认 0.2）。
+因此当前 `grpo_clip` 比较的是“当前 policy 与固定参考策略”，而不是与一个不断刷新的 old policy。
 
----
+### 一些 CLI 参数已经为后续扩展留好口子
 
-## 算法对比速查表（本代码库默认与常用超参）
+脚本已经暴露了多种 loss type、group 配置和临时 checkpoint 路径，但整体控制流仍然刻意保持在一个文件可读完的复杂度内。
 
-| 算法 | 损失入口 | 是否用 baseline | 是否用参考策略 | 关键超参 | 适用场景与特点 |
-|---|---|---|---|---|---|
-| REINFORCE | `loss_type=no_baseline` | 否（直接用 raw reward） | 否 | `rollout_batch_size`、`train_batch_size` | 实现最简单，但方差较大，稳定性受限 |
-| REINFORCE-baseline | `loss_type=reinforce_with_baseline` | 是（组内减均值，选配除以 std） | 否 | `group_size`、`advantage_eps`、`use_std_normalization` | 方差明显更低，收敛更稳；本库默认只减均值（`use_std_normalization=False`） |
-| GRPO-clip | `loss_type=grpo_clip` | 是（同上） | 是（`old_log_probs`） | `cliprange`（默认 0.2）、`group_size` | 偏好优化 + 裁剪，抑制过激更新，经验上在数学推理上更稳健 |
+## 为什么这一章重要
 
-补充常用训练参数（见 `alignment/args.py`）：
-- 采样温度/Top-p：`--sampling_temperature=1.0`、`--sampling_top_p=0.9`
-- 微批与累积：`--train_mini_batch_size=8`，按总样本数自动计算 `grad_acc_steps`
-- 设备分工：`--sample_device=cuda:7`、`--reference_model_device=cuda:6`、`--eval_device=cuda:5`
+这是仓库里最能体现 post-training 系统设计的一层：
 
----
+- 任务特定 reward 设计
+- grouped sampling 与方差降低
+- token 级 response-only masking
+- 多角色 GPU 放置
+- 用同一套 reward 契约做周期性离线评估
 
-## 结论与行动
-
-- 关键心得：
-  - 奖励要“既严格又宽容”：格式必须满足，正确性用多路等价判断提高召回；
-  - REINFORCE-baseline 的“分组减均值”能显著降低方差；GRPO 的裁剪进一步稳定更新；
-  - 多卡把采样/参考/评估拆离训练主力卡，避免竞争与干扰；策略模型分层均衡放置，解决大模型训练的内存压力。
-- 结果：在本仓库代码下，我把 Qwen2.5-Math-1.5B 在 GSM8K 的 zero-shot 从约 1% 提升到 63.4%。
-
-现在就试试吧：准备数据、跑三条 `uv run` 命令，观察 `avg_all_rewards` 的提升曲线。如果你有更激进或更细致的奖励设计、调度策略，欢迎在 issues 或评论区交流。
-
-一个开放问题：在更大模型或更复杂推理数据集上，GRPO 的分组大小与裁剪范围如何动态自适应？你的经验是什么？我很期待你的分享。
+它不是一套完整 RLHF 框架，而是一份足够紧凑、但能把 policy、rollout engine、reference model 和 evaluator 如何协作讲清楚的实现。

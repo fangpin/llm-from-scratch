@@ -14,140 +14,283 @@ sourceDocs:
 
 # Transformer 核心
 
-核心模型实现集中在 `llm/transformer.py`。这个文件不只是一个 `Transformer` 类，而是把构成 decoder-only 模型的主要积木都写在一起：
+整个基础模型栈都集中在 `llm/transformer.py`。这个文件的好处在于“单体但不混乱”：你可以不跳来跳去，就把核心架构、loss 和优化器工具一起读完。
 
-- `Linear`
-- `Embedding`
-- `RmsNorm`
-- `Softmax`
-- attention 模块
-- `RoPE`
-- `SwiGlu`
-- `CrossEntropyLoss`
-- 自定义优化器工具
+## 文件级职责
+
+`llm/transformer.py` 同时包含三层逻辑：
+
+1. 基础可训练模块，例如 `Linear`、`Embedding`、`RmsNorm`
+2. 组合模块，例如 attention、RoPE 和 `TransformerBlock`
+3. 训练辅助工具，例如 `CrossEntropyLoss`、`AdamW`、`cos_lr_scheduler` 和 `gradient_clip`
+
+因此主训练脚本可以很短，因为模型局部数学都已经由这个文件负责。
 
 ## 基础层
 
 ### `Linear`
 
-`Linear` 只维护一个权重矩阵，用 `einx.dot` 做矩阵乘。
+`Linear` 持有一个形状为 `[out_features, in_features]` 的权重矩阵 `self.w`，前向计算是：
 
-如果没有传入现成权重，就会使用截断正态分布初始化。这个实现的重点不是功能多，而是把线性层真正需要做的事情暴露出来。
+```python
+einx.dot("... [in], out [in] -> ... out", x, self.w)
+```
+
+初始化时如果没有外部权重，会使用截断正态分布，标准差是：
+
+```python
+sigma = math.sqrt(2.0 / (in_features + out_features))
+```
+
+这是一个无 bias 的线性投影。去掉 bias 让层更简洁，也和很多 decoder-only 结构的默认选择一致。
 
 ### `Embedding`
 
-`Embedding` 维护一张可学习的 embedding table，前向时直接用 token ids 做索引。
+`Embedding` 持有一张形状为 `[num_embeddings, embedding_dim]` 的参数表，前向时直接用 token id 做索引。
 
-这也让模型的输入路径非常直白：
-
-`token_ids -> embeddings`
-
-## RMSNorm
-
-`RmsNorm` 的前向逻辑是：
-
-1. 先把输入转成 float32
-2. 计算最后一维的均方
-3. 用 `rsqrt` 做缩放
-4. 乘以可学习参数 `g`
-5. 再转回原始 dtype
-
-它和 LayerNorm 的差异在于不减均值，只做均方归一化。这正是这个仓库选择更现代 decoder-only 配置的一个体现。
-
-## Attention 路径
-
-### `ScaledDotProductAttention`
-
-注意力的核心过程完全展开在代码里：
-
-1. 计算 `QK^T`
-2. 除以 `sqrt(d_model)`
-3. 如果有 mask，就把被遮掉的位置填成 `-1e9`
-4. 经过自定义 softmax
-5. 再乘上 `V`
-
-这里的 mask 约定也很清楚：`true` 表示该位置不参与 softmax。
-
-### `MultiHeadAttention`
-
-这个模块会先一次性投影出拼在一起的 `QKV`，再用 `einx.rearrange` 拆成多头结构。
-
-同时，它在初始化时就缓存了 causal mask，并在前向时按当前序列长度裁切，所以模型天然是 autoregressive decoder-only。
-
-### `MultiHeadAttentionWithRoPE`
-
-这个类在多头注意力基础上加入 RoPE，对 `q` 和 `k` 做旋转位置编码，然后再进入注意力计算。
-
-如果外部没有传 `token_positions`，它会自动构造 `0..seq_len-1` 的位置张量。
-
-## RoPE
-
-`RoPE` 在初始化时会预先缓存所有位置的 cosine 和 sine 表。
-
-前向时的关键步骤是：
-
-1. 按 token position 取出对应 cos/sin
-2. 把最后一维拆成成对坐标
-3. 把 `(a, b)` 旋转成 `(-b, a)`
-4. 用 trig 缓存组合原向量和旋转向量
-
-所以这里的位置编码不是把位置 embedding 加到 token embedding 上，而是直接作用在注意力里的 `q` / `k` 向量。
-
-## SwiGLU 前馈层
-
-文件里直接定义了：
+初始化标准差是：
 
 ```python
-FFN = SwiGlu
+1 / math.sqrt(embedding_dim)
 ```
 
-`SwiGlu` 使用三层线性变换：
+这里没有额外的 learned positional embedding，因为位置编码稍后会交给 RoPE。
 
-- `w1`
-- `w3`
-- `w2`
+### `RmsNorm`
 
-其核心前向为：
+`RmsNorm` 的实现完全显式展开：
+
+1. 输入先 cast 到 `float32`
+2. 计算最后一维的均方
+3. 乘 `rsqrt(variance + eps)`
+4. 再乘可学习增益 `g`
+5. 最后 cast 回原 dtype
+
+这里有两个实现点值得记住：
+
+- RMSNorm 只按模长归一化，不减均值
+- `float32` cast 提高了低精度训练的稳定性
+
+## 非线性与前馈层
+
+### `SiLu`
+
+`SiLu` 直接写成：
+
+```python
+torch.sigmoid(x) * x
+```
+
+### `SwiGlu`
+
+真正被 block 使用的是 `SwiGlu`。它定义了三层线性变换：
+
+- `w1`：gate 分支
+- `w3`：value 分支
+- `w2`：投回模型维度
+
+前向公式是：
 
 ```python
 self.w2(self.silu(self.w1(x)) * self.w3(x))
 ```
 
-这也是 README 里强调的现代 FFN 结构来源。
+文件里还有这句别名：
 
-## Block 结构
+```python
+FFN = SwiGlu
+```
 
-`TransformerBlock` 是典型 pre-norm 结构：
+所以所有 block 的前馈层实际上都是 SwiGLU。
 
-1. 先 norm
-2. 进入 attention
-3. 做 residual add
-4. 再 norm
-5. 进入前馈层
-6. 再做 residual add
+## 旋转位置编码
 
-所以这个仓库的 block 不是教学简化版 post-norm，而是更贴近现代 decoder-only 配置。
+`RoPE` 会在初始化时预先构造 cosine / sine cache。
 
-## 完整 Transformer
+### cache 的构造方式
 
-`Transformer` 本体的前向路径很直接：
+构造函数里依次计算：
 
-1. token ids 进 embedding
-2. 依次通过所有 block
-3. 经过最终 RMSNorm
-4. 投影回词表 logits
+- 偶数维度对应的 `inv_freq`
+- 位置索引 `t = arange(max_seq_len)`
+- `freqs = outer(t, inv_freq)`
+- 通过 `repeat_interleave` 扩成完整维度
+- `cos_cached` 与 `sin_cached`
 
-如果没有外部传入位置，它会自动按序列长度构造 position。
+因此运行时的位置编码变成了查表问题。
 
-## 自定义 Loss 与优化器工具
+### 前向规则
 
-`CrossEntropyLoss` 会显式把 logits 和 targets reshape 成二维和一维，再做 `log_softmax` 和正确标签索引，最后求平均 NLL。
+运行时，`RoPE.forward()` 会：
 
-同一个文件里还定义了：
+1. 根据 `token_positions` 取出对应的 `cos` 和 `sin`
+2. 把最后一维 reshape 成成对坐标
+3. 把 `(a, b)` 旋转为 `(-b, a)`
+4. 用
 
-- `SGDDecay`
-- `AdamW`
-- `cos_lr_scheduler`
-- `gradient_clip`
+```python
+x * cos + x_rotated * sin
+```
 
-这也说明仓库的“从零实现”范围不只到前向网络为止，而是把训练最常用的配套工具也一并放进了核心实现层。
+组合原向量与旋转向量
+
+如果输入是 4 维张量，代码会额外 `unsqueeze(1)`，使 trig cache 与 head 维对齐。
+
+## Attention 栈
+
+### `Softmax`
+
+文件自己实现了稳定 softmax：
+
+1. 先减去行最大值
+2. 再指数化
+3. 用指数和做归一化
+
+这样 attention 逻辑可以完全自洽，不依赖黑箱库函数。
+
+### `ScaledDotProductAttention`
+
+这个模块依次做：
+
+1. `att = QK^T`
+2. `att_scale = att / sqrt(d_model)`
+3. 如果有 mask，用 `masked_fill(mask, -1e9)` 遮掉位置
+4. 对 key 维做 softmax
+5. 再乘上 `V`
+
+这里 mask 的语义很明确：`True` 表示该位置不应参与 softmax。
+
+### `MultiHeadAttention`
+
+这个层的执行顺序是：
+
+1. 一次线性投影到 `3 * d_model`
+2. 拆成 `Q`、`K`、`V`
+3. reshape 成 `[batch, heads, seq, head_dim]`
+4. 应用 causal attention
+5. 拼回所有 head
+6. 再做输出投影
+
+causal mask 在初始化时就缓存好了：
+
+```python
+torch.triu(torch.ones(max_seq_len, max_seq_len, dtype=torch.bool), diagonal=1)
+```
+
+运行时只需要按当前 `seq_len` 截取。
+
+### `MultiHeadAttentionWithRoPE`
+
+这个类继承了 `MultiHeadAttention` 的整体流程，但在算 attention score 前插入：
+
+```python
+q = self.rope(q, token_positions)
+k = self.rope(k, token_positions)
+```
+
+如果外部没传 `token_positions`，它会自动构造每个 batch 对应的 `0..seq_len-1`。
+
+所以同一套 attention 模块既能服务训练，也能服务滑动窗口推理。
+
+## Block 组合方式
+
+`TransformerBlock` 是典型的 pre-norm 残差结构：
+
+1. `x_norm = rms_norm1(x)`
+2. `x_atten = mult_head_atten(x_norm, token_positions)`
+3. `x = x + x_atten`
+4. `x_norm = rms_norm2(x)`
+5. `x_ffe = ffe(x_norm)`
+6. 返回 `x + x_ffe`
+
+这就是一个现代 decoder-only block 的基本形态：
+
+- pre-norm
+- attention 内部使用 RoPE
+- 前馈层使用 SwiGLU
+
+## 顶层 `Transformer`
+
+顶层模型的前向顺序很简单：
+
+1. token id 先过 `Embedding`
+2. 依次通过所有 `TransformerBlock`
+3. 经过最终 `RmsNorm`
+4. 用 `out_linear` 投影到词表 logits
+
+如果没有显式传位置，模型会根据序列长度自动构造 `token_positions`。
+
+所以顶层接口很小：
+
+```python
+forward(token_ids, token_positions=None) -> logits
+```
+
+训练脚本和生成脚本都复用了这个接口。
+
+## Loss 实现
+
+`CrossEntropyLoss` 也没有调用黑箱封装，而是显式完成：
+
+1. 把 logits reshape 成二维 `[(...), vocab]`
+2. 把 target reshape 成一维 `[(...)]`
+3. 计算 `log_softmax`
+4. 取出正确标签的 log prob
+5. 求负并取平均
+
+这让 next-token loss 的数学定义在文件里一眼就能看到。
+
+## 优化器与调度工具
+
+### `SGDDecay`
+
+`SGDDecay` 是一个教学型优化器，学习率按：
+
+```python
+lr / sqrt(t + 1)
+```
+
+衰减。
+
+### `AdamW`
+
+自定义 `AdamW` 会显式维护：
+
+- `t`
+- 一阶动量 `m`
+- 二阶动量 `sm`
+
+每次 step 里会：
+
+1. 更新 `m` 和 `sm`
+2. 做 bias correction
+3. 用 `m_hat` 与 `sm_hat` 更新参数
+4. 再做 decoupled weight decay
+
+这也解释了为什么分布式训练里优化器状态会成为显存大头。
+
+### `cos_lr_scheduler`
+
+这个调度器分三段：
+
+- `warmup_iters` 之前线性升高
+- 到 `cos_cycle_iters` 为止做 cosine decay
+- 之后固定在 `lr_min`
+
+### `gradient_clip`
+
+`gradient_clip()` 会先计算所有梯度的全局范数，再在超出 `max_norm` 时按统一系数原地缩放。
+
+## 这个文件的架构价值
+
+这个文件最有价值的地方不是“新奇”，而是把现代 decoder-only 的关键选择放在了一个可以完整读完的实现里：
+
+- 无 bias 投影
+- RMSNorm
+- RoPE
+- SwiGLU
+- causal self-attention
+- 显式 next-token loss
+- 显式优化器状态
+
+因此如果你想看“模型内部数学如何直接接到训练循环上”，`llm/transformer.py` 是仓库里最值得精读的一份文件。

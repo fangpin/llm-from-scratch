@@ -14,87 +14,80 @@ sourceDocs:
 
 # Transformer Core
 
-The core model lives in `llm/transformer.py`. The file is not only a `Transformer` class. It also defines the primitive layers and utility logic that the training script depends on:
+The entire base model stack lives in `llm/transformer.py`. The file is deliberately monolithic in the good sense: a reader can understand the core architecture, the loss, and the optimizer utilities without jumping across a large framework.
 
-- custom `Linear`
-- `Embedding`
-- `RmsNorm`
-- `Softmax`
-- attention modules
-- `RoPE`
-- `SwiGlu`
-- `CrossEntropyLoss`
-- custom optimizer utilities
+## File-Level Responsibilities
 
-## Custom Linear and Embedding Layers
+`llm/transformer.py` contains three layers of logic:
 
-`Linear` stores a single learnable weight matrix and applies it with:
+1. primitive trainable modules such as `Linear`, `Embedding`, and `RmsNorm`
+2. compositional model blocks such as attention, RoPE, and `TransformerBlock`
+3. optimization helpers such as `CrossEntropyLoss`, `AdamW`, `cos_lr_scheduler`, and `gradient_clip`
+
+That design keeps the main training script extremely small because all model-local math is already owned here.
+
+## Primitive Layers
+
+### `Linear`
+
+`Linear` stores a single weight matrix `self.w` with shape `[out_features, in_features]` and applies it with:
 
 ```python
 einx.dot("... [in], out [in] -> ... out", x, self.w)
 ```
 
-The implementation uses truncated normal initialization when pretrained weights are not supplied.
-
-`Embedding` keeps a single learnable embedding table and indexes it directly with token ids.
-
-These layers are simple by design. The point is not to out-feature `torch.nn`. The point is to make the data flow visible.
-
-## RMSNorm Instead of LayerNorm
-
-`RmsNorm` casts the input to float32, computes the mean square on the last dimension, rescales the activation, and applies a learned gain vector `g`.
-
-Two details matter here:
-
-1. it does not subtract the mean, unlike LayerNorm
-2. it restores the original input dtype at the end
-
-That matches the repo's "modern decoder-only baseline" goal instead of a historical Transformer baseline.
-
-## Attention Stack
-
-### `ScaledDotProductAttention`
-
-The attention module:
-
-1. computes `QK^T`
-2. divides by `sqrt(d_model)`
-3. applies an optional mask with `masked_fill(mask, -1e9)`
-4. runs a custom softmax
-5. multiplies attention scores by `V`
-
-The mask convention is explicit: `true` means the position should be masked out.
-
-### `MultiHeadAttention`
-
-This layer projects the input once into concatenated `QKV`, then reshapes with `einx.rearrange` into head-major tensors.
-
-It also precomputes a causal upper-triangular mask and slices it to the active sequence length:
+The initialization path uses truncated normal with:
 
 ```python
-causal_mask = torch.triu(torch.ones(max_seq_len, max_seq_len, dtype=torch.bool, device=device), diagonal=1)
+sigma = math.sqrt(2.0 / (in_features + out_features))
 ```
 
-That keeps the implementation decoder-only and autoregressive.
+This is a straightforward affine projection without a bias term. The absence of bias simplifies the layer and matches common decoder-only implementations where bias-free projections are acceptable.
 
-### `MultiHeadAttentionWithRoPE`
+### `Embedding`
 
-This subclass reuses the base multi-head logic and inserts RoPE on `q` and `k` before the attention kernel runs.
+`Embedding` holds a parameter table `self.embeddings` of shape `[num_embeddings, embedding_dim]` and indexes it directly with integer token ids. Initialization uses truncated normal with standard deviation `1 / sqrt(embedding_dim)`.
 
-If no `token_positions` are passed, it creates a default `0..seq_len-1` position tensor for each batch item.
+There is no learned positional embedding table because the model relies on RoPE later in the stack.
 
-## Rotary Position Embeddings
+### `RmsNorm`
 
-`RoPE` precomputes cached cosine and sine tables up to `max_seq_len`. During forward:
+`RmsNorm` is implemented explicitly rather than imported from a library:
 
-1. it looks up the cached position-specific cos and sin values
-2. it reshapes the head dimension into paired coordinates
-3. it rotates each pair `(a, b)` into `(-b, a)`
-4. it combines original and rotated vectors with the cached trig values
+1. cast input to `float32`
+2. compute mean square along the last dimension
+3. multiply by `rsqrt(variance + eps)`
+4. scale by learnable gain `g`
+5. cast back to the original dtype
 
-That means positional information is injected by rotating query and key vectors rather than by adding learned position embeddings to token embeddings.
+Two details matter:
 
-## Feed-Forward Network
+- RMSNorm normalizes by magnitude only; it does not subtract the mean.
+- The float32 cast improves numerical stability for lower-precision training.
+
+## Nonlinearities and Feed-Forward Path
+
+### `SiLu`
+
+`SiLu` is written directly as:
+
+```python
+torch.sigmoid(x) * x
+```
+
+### `SwiGlu`
+
+`SwiGlu` is the feed-forward implementation actually used by the transformer. It defines:
+
+- `w1`: gate input projection
+- `w3`: value input projection
+- `w2`: output projection back to model dimension
+
+The forward rule is:
+
+```python
+self.w2(self.silu(self.w1(x)) * self.w3(x))
+```
 
 The file aliases:
 
@@ -102,55 +95,188 @@ The file aliases:
 FFN = SwiGlu
 ```
 
-`SwiGlu` uses three linear layers:
+So every transformer block uses SwiGLU as its MLP.
 
-- `w1`
-- `w3`
-- `w2`
+## Rotary Position Embeddings
 
-The forward path is:
+`RoPE` precomputes cached cosine and sine tables at initialization time.
+
+### Cache construction
+
+The constructor builds:
+
+- `inv_freq` for even dimensions
+- `t = arange(max_seq_len)`
+- `freqs = outer(t, inv_freq)`
+- duplicated frequencies by `repeat_interleave`
+- `cos_cached` and `sin_cached`
+
+This turns positional encoding into a table lookup problem during forward.
+
+### Forward rule
+
+At runtime:
+
+1. retrieve `cos` and `sin` rows for `token_positions`
+2. reshape the last dimension into paired coordinates
+3. rotate each pair `(a, b)` into `(-b, a)`
+4. combine original and rotated versions via:
 
 ```python
-self.w2(self.silu(self.w1(x)) * self.w3(x))
+x * cos + x_rotated * sin
 ```
 
-That is the repo's feed-forward block and matches the stated use of SwiGLU rather than ReLU or GELU.
+If the input is 4-D, the code unsqueezes the trigonometric tables to align with the head dimension.
+
+## Attention Stack
+
+### `Softmax`
+
+The file provides a custom stable softmax:
+
+1. subtract row-wise max
+2. exponentiate
+3. divide by summed exponentials
+
+This keeps the attention implementation self-contained.
+
+### `ScaledDotProductAttention`
+
+This module computes:
+
+1. `att = QK^T`
+2. `att_scale = att / sqrt(d_model)`
+3. optional mask application with `masked_fill(mask, -1e9)`
+4. softmax over the key dimension
+5. weighted sum against `V`
+
+The mask convention is explicit: `True` means "this position must not participate in softmax."
+
+### `MultiHeadAttention`
+
+This layer performs:
+
+1. one projection from `d_model` to `3 * d_model`
+2. split into `Q`, `K`, `V`
+3. reshape into `[batch, heads, seq, head_dim]`
+4. apply causal attention
+5. reassemble heads
+6. output projection back to `d_model`
+
+The causal mask is precomputed once:
+
+```python
+torch.triu(torch.ones(max_seq_len, max_seq_len, dtype=torch.bool), diagonal=1)
+```
+
+and sliced to `seq_len` at runtime.
+
+### `MultiHeadAttentionWithRoPE`
+
+This subclass reuses the same projection logic but inserts:
+
+```python
+q = self.rope(q, token_positions)
+k = self.rope(k, token_positions)
+```
+
+before attention scores are computed.
+
+If `token_positions` is omitted, the layer generates `0..seq_len-1` for each batch item. That makes the same attention module usable for both standard training and inference windows.
 
 ## Transformer Block Composition
 
-Each `TransformerBlock` is pre-norm:
+Each `TransformerBlock` is pre-norm and residual:
 
-1. normalize
-2. attention
-3. residual add
-4. normalize again
-5. feed-forward
-6. residual add
+1. `x_norm = rms_norm1(x)`
+2. `x_atten = mult_head_atten(x_norm, token_positions)`
+3. `x = x + x_atten`
+4. `x_norm = rms_norm2(x)`
+5. `x_ffe = ffe(x_norm)`
+6. return `x + x_ffe`
 
-That structure is visible in the block implementation and aligns with the README claim that the project uses a modern decoder-only layout.
+This is a modern decoder-only structure:
 
-## Transformer Model
+- pre-norm for training stability
+- RoPE in the attention path
+- SwiGLU in the feed-forward path
 
-`Transformer` itself is straightforward:
+## Full `Transformer`
 
-1. token ids -> embeddings
-2. run all blocks
-3. final RMSNorm
-4. project back to vocabulary logits
+The top-level model performs:
 
-If `token_positions` are not supplied, the model generates them from sequence length.
+1. token-id lookup through `Embedding`
+2. repeated application of `TransformerBlock`
+3. final `RmsNorm`
+4. projection to vocabulary logits with `out_linear`
 
-This keeps generation and training code paths aligned: both can call the same model interface and optionally override token positions when needed.
+If no positions are supplied, it builds a dense position tensor from sequence length.
 
-## Custom Loss and Optimizer Utilities
+The model therefore has a very small interface:
 
-`CrossEntropyLoss` explicitly reshapes logits and targets, computes `log_softmax`, indexes the correct-token log probability, and averages the negative log likelihood.
+```python
+forward(token_ids, token_positions=None) -> logits
+```
 
-The file also defines:
+That interface is reused by both `llm/training.py` and `llm/generating.py`.
 
-- `SGDDecay`
-- `AdamW`
-- `cos_lr_scheduler`
-- `gradient_clip`
+## Loss Implementation
 
-That is important because the repo's "from scratch" scope includes not just the forward model, but also the optimization tools around it.
+`CrossEntropyLoss` is also written out directly. It:
+
+1. flattens logits to `[(...), vocab]`
+2. flattens targets to `[(...)]`
+3. computes `log_softmax`
+4. indexes the correct-token log probability
+5. averages the negative log likelihood
+
+This keeps the training objective visible and avoids hiding a simple next-token loss behind a single library call.
+
+## Optimizer and Scheduling Utilities
+
+### `SGDDecay`
+
+`SGDDecay` is a small educational optimizer where the effective step size decays like `lr / sqrt(t + 1)`.
+
+### `AdamW`
+
+The custom `AdamW` stores:
+
+- `t`
+- first moment `m`
+- second moment `sm`
+
+For each step it:
+
+1. updates `m` and `sm`
+2. computes bias-corrected `m_hat` and `sm_hat`
+3. applies the Adam update
+4. applies decoupled weight decay
+
+That makes the optimizer state shape explicit and useful for understanding why optimizer memory becomes large in distributed training.
+
+### `cos_lr_scheduler`
+
+The scheduler has three regions:
+
+- linear warmup up to `warmup_iters`
+- cosine decay until `cos_cycle_iters`
+- flat `lr_min` afterwards
+
+### `gradient_clip`
+
+`gradient_clip()` computes the global norm across all gradient tensors and scales them in-place if the norm exceeds `max_norm`.
+
+## Architectural Character
+
+The file's main value is not novelty. It is that modern decoder-only decisions are implemented in a single inspectable place:
+
+- bias-free projections
+- RMSNorm
+- RoPE
+- SwiGLU
+- causal self-attention
+- explicit next-token loss
+- explicit optimizer state
+
+That makes `llm/transformer.py` the best file in the repo for understanding how model internals and optimization math connect directly to the training loop.

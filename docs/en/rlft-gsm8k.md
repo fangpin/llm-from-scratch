@@ -18,93 +18,298 @@ sourceDocs:
 
 # Reinforcement Learning Fine-Tuning on gsm8k
 
-The RLFT path extends the same gsm8k problem used in SFT, but moves into policy-gradient training with explicit reward design and a more complex device topology.
+The RLFT path keeps the same GSM8K task and the same `<think> / <answer>` response contract, but it replaces supervised next-token training with policy-gradient style updates. This chapter focuses on the code as it exists now: multi-role model placement, grouped rewards, response-only masking, and the exact loss variants implemented in `alignment/grpo.py`.
 
-The main pieces are:
+## File-Level Responsibilities
 
-- `alignment/train_rl.py`
-- `alignment/grpo.py`
-- `alignment/drgrpo_grader.py`
+The RL workflow is split across:
 
-## Reward Function
+- `alignment/train_rl.py` for orchestration and the main training loop
+- `alignment/grpo.py` for reward normalization and policy-gradient losses
+- `alignment/drgrpo_grader.py` for format plus math-answer rewards
+- `alignment/evaluate.py` for batch evaluation
+- `alignment/args.py` for CLI defaults
 
-The reward function is `r1_zero_reward_fn`.
+The dataset and prompt template are reused from the SFT path, so RL starts from the same task definition and output schema.
 
-It does not only ask whether the final numeric answer is right. It first checks whether the model respected the required structure:
+## Entrypoint and Checkpoint Source
 
-- `</think> <answer>`
-- `</answer>`
+The `__main__` block in `train_rl.py` parses both the RL arguments and the SFT arguments.
 
-Only properly formatted outputs can receive a full reward.
+That is not accidental. The RL script uses:
 
-That makes format compliance part of the policy objective rather than just a reporting metric.
+```python
+sft_args.checkpoint_path
+```
 
-## Grouped Reward Normalization
+as the base policy checkpoint when no RL checkpoint already exists.
 
-`compute_group_normalized_rewards()` computes rewards for multiple responses sampled from the same prompt, then normalizes them inside each group.
+The entrypoint logic is:
+
+- if `args.checkpoint_path` already contains model weights, skip training and evaluate that RL checkpoint
+- otherwise, start RL training from the SFT checkpoint path
+
+So RLFT is implemented as a post-SFT stage, not as a standalone training branch from the raw Hugging Face base model.
+
+## Role-Split Device Topology
+
+`train_rl.py` assigns different jobs to different devices:
+
+- `sample_model`: vLLM rollout generation
+- `reference_model`: frozen log-prob reference
+- `eval_model`: periodic evaluation
+- `model`: trainable policy
+
+The CLI defaults are:
+
+- `sample_device = cuda:7`
+- `reference_model_device = cuda:6`
+- `eval_device = cuda:5`
+
+All remaining visible GPUs are given to the trainable policy model through `partition_model_across_devices(args)`.
+
+### How `partition_model_across_devices()` works
 
 The function:
 
-1. computes raw rewards
-2. reshapes them into `[n_prompts, group_size]`
-3. subtracts the group mean
-4. optionally divides by group standard deviation
+1. reads the total GPU count
+2. removes the sampling, reference, and evaluation devices from the pool
+3. picks the first remaining GPU as `main_gpu`
+4. assigns `model.embed_tokens`, `lm_head`, and `model.norm` to `main_gpu`
+5. spreads transformer layers across the remaining policy GPUs
 
-This creates relative advantages rather than using raw rewards directly for every policy update.
+The layer placement rule is:
 
-## Loss Variants
+```python
+layers_per_gpu = math.ceil(num_layers / len(layer_gpus))
+```
 
-`compute_policy_gradient_loss()` exposes three modes:
+and layers are assigned sequentially.
 
-- `no_baseline`
-- `reinforce_with_baseline`
-- `grpo_clip`
+In practice, that means the current implementation expects a machine with enough GPUs to keep rollout, reference, evaluation, and policy execution separate.
 
-For `grpo_clip`, the implementation compares new-policy log probabilities with detached old-policy log probabilities, computes an importance ratio, and clamps that ratio inside a configured clip range.
+## Initialization Path
 
-That gives the RL path a PPO-like stability mechanism while staying compact enough to read.
+Inside `train(args, base_model_checkpoint_path)`, the runtime objects are created in this order:
 
-## Response-Only Masking
+1. `SummaryWriter`
+2. vLLM `sample_model` from `base_model_checkpoint_path`
+3. tokenizer from `args.model`
+4. trainable Hugging Face policy model from `base_model_checkpoint_path`
+5. frozen Hugging Face `reference_model` from `base_model_checkpoint_path`
+6. `Gsm8kDataset` and `DataLoader`
+7. `torch.optim.AdamW`
 
-`train_rl.py` builds a `response_mask` per microbatch so that loss averaging only applies to the generated response region, not the prompt prefix or padding positions.
+So both the rollout engine and the frozen reference model start from the same checkpoint as the trainable policy.
 
-That keeps optimization focused on what the policy actually chose to generate.
+## Per-Step Data Flow
 
-## Device Topology
+For each batch from `DataLoader`, the script receives:
 
-One of the most distinctive features of this RLFT path is how it splits work across GPUs:
+- `prompts`
+- supervised completions, which are ignored in RL mode
+- `ground_truths`
 
-- a vLLM sampling model
-- a frozen reference model
-- an evaluation model
-- a trainable policy model distributed across the remaining GPUs
+It then repeats each prompt `group_size` times:
 
-`partition_model_across_devices()` manually assigns layers to GPUs instead of relying on a fully opaque auto-placement strategy.
+```python
+grouped_prompts = [p for p in prompts for _ in range(group_size)]
+grouped_ground_truths = [gt for gt in ground_truths for _ in range(group_size)]
+```
 
-That makes the training topology inspectable and controllable.
+If `loss_type == "no_baseline"`, the code forces `group_size = 1`. Otherwise it uses the configured group size.
 
-## Training Loop Shape
+## Rollout Generation
 
-The RL training loop does the following:
+Rollouts are generated by vLLM with:
 
-1. sample grouped prompts
-2. generate rollouts with vLLM
-3. compute rewards and normalized advantages
-4. tokenize prompt-plus-response text
-5. compute current-policy and reference-policy log probabilities
-6. build response masks
-7. run microbatch policy-gradient updates
-8. clip gradients and step the optimizer
+- `temperature = args.sampling_temperature`
+- `top_p = args.sampling_top_p`
+- `min_tokens = args.sampling_min_tokens`
+- `max_tokens = args.sampling_max_tokens`
+- `stop = ["</answer>"]`
+- `repetition_penalty = 1.1`
+- `include_stop_str_in_output = True`
 
-Periodic checkpoints are evaluated with the math evaluator just like the SFT path.
+The returned response texts are concatenated back with the prompts to form `full_texts`.
 
-## Why This Example Matters
+That means the policy-gradient code works on full prompt-plus-response tokenizations, then masks out the prompt region later.
 
-This is the strongest example in the repo of moving beyond "from-scratch pretraining" into a full downstream optimization workflow:
+## Reward Calculation and Group Normalization
 
-- reward design
-- grouped preference-style normalization
-- clipped policy updates
-- multi-role multi-GPU execution
+The reward function is still `r1_zero_reward_fn`, so RL and SFT share the exact same downstream notion of success:
 
-That makes the RLFT chapter the best place to understand how the repository handles training systems work once the model is already useful and the optimization target becomes behavior rather than pure next-token likelihood.
+- valid format
+- correct final answer
+
+`compute_group_normalized_rewards()` in `alignment/grpo.py` then converts raw rewards into advantages.
+
+The implementation is:
+
+1. compute raw scalar rewards for every rollout
+2. reshape them to `[n_prompts, group_size]`
+3. subtract the group mean
+4. optionally divide by the group standard deviation
+5. flatten back to one vector
+
+So the baseline is local to each prompt's sampled response group rather than global across the entire batch.
+
+## Tokenization and Response Masking
+
+The script tokenizes:
+
+- grouped prompts by themselves
+- full prompt-plus-response texts
+
+Prompt lengths are recovered from the prompt attention mask, not from character counts. For each microbatch, the response mask is built as:
+
+```python
+start = mb_prompt_lengths[j].item()
+end_pos = mb_attention_mask[j].sum().item()
+response_mask[j, start:end_pos] = True
+```
+
+Then the mask excludes:
+
+- padding tokens
+- `eos_token_id`
+- `bos_token_id`
+
+So loss averaging only covers tokens the policy actually generated in the response span.
+
+## Log Probabilities
+
+For each microbatch, the trainable policy computes:
+
+```python
+policy_logits = model(...).logits
+policy_log_probs = gather(log_softmax(policy_logits), input_ids)
+```
+
+The frozen reference model computes:
+
+```python
+old_logits = reference_model(...).logits
+old_log_probs = gather(log_softmax(old_logits), input_ids).detach()
+```
+
+The reference forward pass runs under `torch.inference_mode()` and on its dedicated device, then moves logits back to the policy device.
+
+## Loss Variants in `alignment/grpo.py`
+
+`compute_policy_gradient_loss()` exposes three modes.
+
+### `no_baseline`
+
+Use raw reward directly:
+
+```python
+- reward * log_prob
+```
+
+This is the plain REINFORCE-style objective.
+
+### `reinforce_with_baseline`
+
+Use the group-normalized advantage instead of the raw reward:
+
+```python
+- advantage * log_prob
+```
+
+This reduces variance by centering each prompt's sampled responses around their group mean.
+
+### `grpo_clip`
+
+Use a clipped importance-ratio objective:
+
+1. compute `log_ratio = policy_log_probs - old_log_probs`
+2. exponentiate to get the importance ratio
+3. clamp the ratio inside `[1 - cliprange, 1 + cliprange]`
+4. multiply both unclipped and clipped ratios by the advantage
+5. take the negative minimum
+
+This is the most PPO-like mode in the repository, but it stays tokenwise and compact enough to read directly.
+
+## Microbatch Backward and Gradient Accumulation
+
+`grpo_microbatch_train_step()` does not just compute loss; it also calls `mean_loss.backward()` internally.
+
+Before backward, it:
+
+- computes per-token loss from the selected objective
+- averages it with `masked_mean(...)` over the response tokens only
+- divides by `gradient_accumulation_steps` when needed
+
+`train_rl.py` computes:
+
+```python
+grad_acc_steps = math.ceil(total_samples / args.train_mini_batch_size)
+```
+
+and loops through the batch in microbatches, so one rollout batch can be trained with several backward passes before a single optimizer step.
+
+After all microbatches:
+
+- gradients are clipped with `clip_grad_norm_(..., max_norm=1.0)`
+- `optimizer.step()` updates the policy
+- `optimizer.zero_grad()` clears gradients
+
+## Periodic Evaluation
+
+Every `evaluate_freq` steps, the script:
+
+1. saves the current policy to `args.tmp_checkpoint_path`
+2. saves the tokenizer there as well
+3. launches a fresh vLLM `LLM(...)` for evaluation
+4. runs `evaluate_math(...)`
+5. logs `score["avg_all_rewards"]` to TensorBoard
+6. frees the temporary evaluation model
+
+At the end of each full pass through the dataloader, it also saves the policy to `args.checkpoint_path`.
+
+## End-to-End Role Split
+
+```mermaid
+flowchart TD
+    A["gsm8k prompts"] --> B["vLLM rollout model"]
+    B --> C["responses"]
+    C --> D["r1_zero_reward_fn"]
+    D --> E["group-normalized advantages"]
+    E --> F["trainable policy model"]
+    C --> F
+    C --> G["frozen reference model"]
+    F --> H["policy log probs"]
+    G --> I["reference log probs"]
+    H --> J["REINFORCE / GRPO loss"]
+    I --> J
+    J --> K["optimizer step"]
+```
+
+## Current Implementation Boundaries
+
+The most important current-state details are easy to miss if you only read the high-level idea.
+
+### Rollout sampling is not hot-swapped
+
+`sample_model` is initialized once from `base_model_checkpoint_path` and is not refreshed inside the training loop. So rollout generation comes from the starting checkpoint for the entire run unless the code is extended.
+
+### The reference model is fixed
+
+`reference_model` is also initialized once from the starting checkpoint. The commented-out block that would update the old policy is not active, so `grpo_clip` compares against a fixed reference rather than a periodically refreshed old policy.
+
+### Some CLI options are scaffolding for future changes
+
+The script already exposes configuration for different loss types, grouping, and temporary checkpoints, but the control flow is still intentionally small enough to inspect in one file.
+
+## Why This Chapter Matters
+
+This is the repository's clearest example of post-training systems work:
+
+- task-specific reward design
+- grouped sampling and variance reduction
+- token-level policy-gradient masking
+- multi-role GPU placement
+- periodic offline evaluation against the same reward contract
+
+It is not a full RLHF framework. It is a compact implementation that makes the moving parts visible enough for a reader to understand how the policy, the rollout engine, the reference model, and the evaluator interact.

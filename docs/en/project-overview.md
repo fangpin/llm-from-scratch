@@ -21,67 +21,189 @@ sourceDocs:
 
 # Project Overview
 
-The repository is structured as a teaching-oriented implementation of a modern decoder-only language model in PyTorch. The goal is not to hide the machinery behind a framework wrapper. The goal is to make every major layer inspectable:
+This repository is best read as a complete training stack rather than a single model file. The implementation surface is deliberately split into a few ownership boundaries:
 
-- tokenization
-- transformer internals
-- optimization and training
-- kernel acceleration
-- distributed execution
-- data preparation
-- alignment examples
+- `llm/` owns tokenizer, model, loss, optimizer utilities, pretraining loop, checkpointing, and generation.
+- `kernel/` owns performance-sensitive attention implementations and benchmark scaffolding.
+- `parallel/` owns multi-GPU communication and optimizer-state sharding.
+- `data_processing/` owns corpus cleanup before tokenization.
+- `alignment/` owns downstream supervised and reinforcement fine-tuning workflows.
 
-## Module Map
+The rest of this document explains how those pieces fit together as a runnable system.
 
-### `llm/`
+## End-to-End System Path
 
-This is the core model stack:
+The main lifecycle in this repo is:
 
-- `llm/bpe_tokenizer.py` implements a byte-pair tokenizer from scratch
-- `llm/transformer.py` implements embeddings, RMSNorm, RoPE, attention, SwiGLU, custom loss, and optimizer utilities
-- `llm/training.py` runs training, validation, logging, and checkpointing
-- `llm/generating.py` loads a checkpoint and runs top-p text generation
-- `llm/checkpoint.py` handles checkpoint save and load
+1. Raw text is cleaned in `data_processing/`.
+2. `llm/bpe_tokenizer.py` trains a byte-level BPE vocabulary and converts text into token-id arrays.
+3. `llm/training.py` memory-maps those arrays, slices fixed-length next-token examples, and trains `Transformer`.
+4. `llm/checkpoint.py` saves model and optimizer state.
+5. `llm/generating.py` reloads the model plus tokenizer and performs top-p sampling.
+6. `alignment/sft.py` and `alignment/train_rl.py` reuse an external base model checkpoint for downstream math alignment.
+
+That split is important. Pretraining code is fully from-scratch PyTorch. Alignment code is intentionally more pragmatic and uses Hugging Face plus vLLM, because the repo wants to show both "mechanics from first principles" and "real downstream workflows."
+
+```mermaid
+flowchart LR
+    A["Raw HTML / text corpora"] --> B["data_processing/*"]
+    B --> C["llm/bpe_tokenizer.py"]
+    C --> D[".npy token-id arrays"]
+    D --> E["llm/training.py"]
+    E --> F["llm/transformer.py"]
+    E --> G["llm/checkpoint.py"]
+    G --> H["llm/generating.py"]
+    G --> I["alignment/sft.py"]
+    I --> J["alignment/train_rl.py"]
+```
+
+## Core Stack: `llm/`
+
+`llm/` is the densest part of the repository. It contains both primitive layers and the training script that consumes them.
+
+### `llm/bpe_tokenizer.py`
+
+This file owns the full byte-pair tokenization lifecycle:
+
+- regex-based pre-tokenization
+- special-token preservation
+- byte vocabulary bootstrapping
+- merge counting and merge learning
+- greedy merge replay during encoding
+- byte reconstruction during decoding
+- tokenizer serialization
+
+The key design decision is that vocabulary entries are stored as `bytes`, not Python strings. That keeps training and inference grounded in byte-level segmentation rather than Unicode character assumptions.
+
+### `llm/transformer.py`
+
+This is not just a model wrapper. It contains:
+
+- `Linear`
+- `Embedding`
+- `RmsNorm`
+- `Softmax`
+- `ScaledDotProductAttention`
+- `MultiHeadAttention`
+- `MultiHeadAttentionWithRoPE`
+- `RoPE`
+- `SwiGlu`
+- `TransformerBlock`
+- `Transformer`
+- `CrossEntropyLoss`
+- custom `SGDDecay`
+- custom `AdamW`
+- cosine LR scheduling
+- gradient clipping
+
+The file therefore acts as both the model definition and the minimal optimization toolkit that the training script expects.
+
+### `llm/training.py`
+
+This file coordinates execution rather than just iterating over minibatches. It:
+
+- seeds all RNG sources per rank
+- configures distributed process groups
+- memory-maps token arrays
+- samples autoregressive windows
+- constructs the model
+- swaps in `DDP` and `ShardedOptimizer` when `world_size > 1`
+- performs validation on rank 0
+- clips gradients
+- applies a cosine learning-rate schedule
+- checkpoints model state
+
+The training script is intentionally plain enough that a reader can map every high-level training concept to 1-2 functions.
+
+### `llm/checkpoint.py` and `llm/generating.py`
+
+Checkpointing is a small but important contract in the repo. The saved object contains:
+
+- `model`
+- `optimizer`
+- `iteration`
+
+`llm/generating.py` proves the contract is sufficient by reloading the same checkpoint, reloading the saved tokenizer, and sampling text autoregressively with temperature and top-p truncation.
+
+## Performance Layer: `kernel/` and `parallel/`
+
+The repo separates model definition from scale/performance concerns.
 
 ### `kernel/`
 
-This directory isolates attention-kernel optimization work:
+`kernel/flash_attention_triton.py` introduces a Triton Flash Attention implementation that reduces attention memory pressure by computing softmax statistics block by block instead of materializing the full score matrix.
 
-- `flash_attention_triton.py` implements the Triton path
-- `flash_attention_mock.py` provides a PyTorch-style reference implementation
-- `bench_mark/` compares different attention paths and model behaviors
+`kernel/flash_attention_mock.py` serves as a slower, easier-to-read reference path. The benchmark scripts then measure whether the optimized path is actually worth using.
+
+This means the repository treats kernel work as:
+
+- algorithm design
+- implementation
+- validation
+- performance measurement
+
+rather than shipping an opaque optimized primitive with no explanation.
 
 ### `parallel/`
 
-This is the custom distributed-training layer:
+`parallel/ddp.py` implements gradient synchronization with:
 
-- `ddp.py` implements gradient synchronization with post-accumulate hooks and bucketed all-reduce
-- `sharded_optimizer.py` partitions optimizer ownership across ranks to reduce per-device optimizer-state memory
+- parameter broadcast at init
+- post-accumulate gradient hooks
+- bucketed flattening
+- asynchronous `all_reduce`
+- explicit wait and unflatten in `finish_gradient_sync()`
 
-### `data_processing/`
+`parallel/sharded_optimizer.py` reduces optimizer-state memory by assigning parameter ownership to ranks with a simple modulo rule and broadcasting updated shards after the local optimizer step.
 
-This is the preprocessing pipeline for large raw text corpora:
+Together, those two files explain how the repo scales the same training loop from one GPU to multiple GPUs without delegating every detail to framework magic.
 
-- HTML extraction
-- language identification
-- heuristic filtering
-- deduplication
-- PII masking
-- harmful-content detection
-- quality classification
+## Data Layer: `data_processing/`
 
-### `alignment/`
+The data pipeline exists because the repo assumes raw text is messy by default. The module boundary is:
 
-This directory contains concrete fine-tuning workflows built around gsm8k and Qwen2.5-Math-1.5B:
+- `html_process.py` for HTML-to-text conversion
+- `language_identification.py` for FastText-based language gating
+- `quality_filter.py` for cheap heuristic filtering
+- `deduplicate.py` for exact and approximate duplicate removal
+- `mask_pii.py` for regex-based sanitization
+- `harmful_detect.py` for NSFW and toxicity classification
+- `quality_classfier.py` for learned quality scoring
 
-- `sft.py` runs supervised fine-tuning
-- `train_rl.py` runs reinforcement fine-tuning
-- `grpo.py` implements grouped reward normalization and policy-gradient losses
-- `drgrpo_grader.py` enforces response format and answer correctness
+The important systems point is ordering. Cheap deterministic filters happen before more expensive or more semantic ones. That keeps large-scale preprocessing computationally tractable.
 
-## Reading Order by Ownership Boundary
+## Alignment Layer: `alignment/`
 
-If you want to understand the repo from first principles, a practical reading order is:
+The alignment code deliberately shifts style. Instead of continuing the from-scratch pretraining stack, it uses the ecosystem tools that are standard for current large-model adaptation.
+
+### `alignment/sft.py`
+
+The SFT path:
+
+- loads a base Hugging Face causal LM
+- builds a GSM8K dataset with explicit `<think>` / `<answer>` formatting
+- masks prompt tokens out of the supervised loss
+- accumulates gradients
+- evaluates through a separate vLLM instance
+
+This is the repo's completion-only fine-tuning example.
+
+### `alignment/train_rl.py`
+
+The RL path adds:
+
+- vLLM-based rollout generation
+- a frozen reference model
+- grouped reward normalization
+- clipped policy-gradient objectives
+- manual multi-GPU role partitioning
+- periodic evaluation
+
+That makes the repo useful not only for model internals, but also for modern post-training system design.
+
+## Reading Order by Dependency
+
+If you want to understand implementation details efficiently, read in this order:
 
 1. `Tokenizer and Vocabulary`
 2. `Transformer Core`
@@ -92,14 +214,15 @@ If you want to understand the repo from first principles, a practical reading or
 7. `Supervised Fine-Tuning on gsm8k`
 8. `Reinforcement Learning Fine-Tuning on gsm8k`
 
-That order follows the implementation stack more closely than the homepage does.
+That order follows actual dependency flow: tokenization feeds pretraining; pretraining feeds optimization and checkpointing; performance features scale the same model; alignment workflows sit on top.
 
-## What Makes This Repo Useful
+## What This Repository Is Optimizing For
 
-Three properties make the project more valuable than a simplified architecture sketch:
+The repo is not primarily optimizing for production packaging. It is optimizing for inspectability:
 
-1. It implements modern decoder-only building blocks instead of stopping at an outdated baseline.
-2. It exposes code paths for both scale work and alignment work, not just the base model.
-3. It keeps most pieces small enough that a reader can inspect them directly.
+- each major concept has a dedicated file
+- training uses explicit helper functions instead of deep callback stacks
+- distributed and kernel work are separated from base-model logic
+- alignment workflows are concrete enough to reproduce
 
-The rest of the docs expand each of those layers with code-adjacent detail.
+That is why the docs are organized around ownership boundaries rather than around marketing categories. The fastest way to understand the project is to trace how tensors, checkpoints, and sampled responses move across those boundaries.
