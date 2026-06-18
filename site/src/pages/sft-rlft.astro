@@ -1,0 +1,20 @@
+---
+import MetricCards from "../components/MetricCards.astro";
+import SectionIntro from "../components/SectionIntro.astro";
+import { siteContent } from "../content/site";
+import BaseLayout from "../layouts/BaseLayout.astro";
+
+const copy = siteContent.en.pages.sftRlft;
+---
+
+<BaseLayout locale="en" currentPath="/sft-rlft" title={copy.title} description={copy.description}>
+  <section class="section">
+    <SectionIntro eyebrow="Applied Results" title={copy.title} description={copy.description} />
+    <MetricCards cards={copy.metrics} />
+    <div class="container">
+      <ol>
+        {copy.steps.map((step) => <li>{step}</li>)}
+      </ol>
+    </div>
+  </section>
+</BaseLayout>

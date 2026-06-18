@@ -1,4 +1,24 @@
-# 从0到1：揭秘LLM预训练前的海量数据清洗全流程
+---
+title: 数据处理流水线
+summary: 解释 data_processing/ 中从 HTML 提取、语言过滤、去重到 PII masking 和质量分类的完整预处理路径。
+slug: data-pipeline
+locale: zh
+group: scale-performance
+order: 7
+translationKey: data-pipeline
+sourceFiles:
+  - data_processing/html_process.py
+  - data_processing/language_identification.py
+  - data_processing/quality_filter.py
+  - data_processing/deduplicate.py
+  - data_processing/mask_pii.py
+  - data_processing/harmful_detect.py
+  - data_processing/quality_classfier.py
+sourceDocs:
+  - docs/4.md
+---
+
+# 数据处理流水线
 
 > **导语**：在大型语言模型（LLM）的璀璨光环之下，一项默默无闻却至关重要的工作——数据清洗，往往被忽视。你是否好奇，那些看似无所不知的AI背后，其“食粮”究竟经历了怎样一番“精加工”？是直接将互联网上的海量数据投喂给模型，还是需要一双无形的“妙手”对其进行淘洗、提纯？
 
@@ -8,7 +28,7 @@
 *   一个工业级的海量数据清洗流程，究竟包含哪些步骤？
 *   如何从零开始，用代码实现一个高效的数据清洗流水线？
 
-本文将深入剖析 [llm-from-scratch](https://github.com/fangpin/llm-from-scratch) 仓库中 `data_processing` 模块，亲手揭开LLM预训练前海量数据清洗的神秘面纱。读完本文，你不仅能透彻理解数据清洗的核心逻辑，更能掌握从0到1构建自己的数据处理工具集的实战能力。让我们一起，开启这场数据“炼金术”之旅！
+本文聚焦当前仓库的 `data_processing/` 模块，解释预训练前的数据清洗路径是如何拆成多个独立工具，并最终组合成可执行流水线的。
 
 
 ## 为什么要进行数据清洗？——“垃圾进，垃圾出”的铁律

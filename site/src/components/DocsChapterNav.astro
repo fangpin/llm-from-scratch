@@ -1,0 +1,34 @@
+---
+import { siteContent } from "../content/site";
+import type { DocEntry } from "../lib/docs";
+import { SITE_BASE_PATH, type Locale, toBasePath } from "../lib/locale";
+
+interface Props {
+  locale: Locale;
+  previous?: DocEntry;
+  next?: DocEntry;
+}
+
+const { locale, previous, next } = Astro.props;
+const labels = siteContent[locale].pages.docs.labels;
+---
+
+<nav class="container docs-chapter-nav" aria-label="Doc chapter navigation">
+  {previous ? (
+    <a class="docs-nav-link" href={toBasePath(previous.locale === "en" ? `/docs/${previous.slug}` : `/zh/docs/${previous.slug}`, SITE_BASE_PATH)}>
+      <span>{labels.previous}</span>
+      <strong>{previous.title}</strong>
+    </a>
+  ) : (
+    <div></div>
+  )}
+
+  {next ? (
+    <a class="docs-nav-link docs-nav-link-next" href={toBasePath(next.locale === "en" ? `/docs/${next.slug}` : `/zh/docs/${next.slug}`, SITE_BASE_PATH)}>
+      <span>{labels.next}</span>
+      <strong>{next.title}</strong>
+    </a>
+  ) : (
+    <div></div>
+  )}
+</nav>

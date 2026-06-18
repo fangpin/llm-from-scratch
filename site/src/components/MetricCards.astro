@@ -1,0 +1,18 @@
+---
+interface Props {
+  cards: { value: string; label: string }[];
+}
+
+const { cards } = Astro.props;
+---
+
+<section class="section">
+  <div class="container proof-band">
+    {cards.map((card) => (
+      <article class="metric-card">
+        <strong>{card.value}</strong>
+        <span>{card.label}</span>
+      </article>
+    ))}
+  </div>
+</section>

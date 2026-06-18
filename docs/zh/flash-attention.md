@@ -1,8 +1,25 @@
-# 突破性能瓶颈：深入解析 Flash Attention 内核优化技术
+---
+title: Flash Attention 与 Kernel 优化
+summary: 解释 kernel/ 中的 Triton Flash Attention 路径、参考实现和性能对比脚本。
+slug: flash-attention
+locale: zh
+group: scale-performance
+order: 5
+translationKey: flash-attention
+sourceFiles:
+  - kernel/flash_attention_triton.py
+  - kernel/flash_attention_mock.py
+  - bench_mark/bench_mark_flash_attention.py
+  - bench_mark/bench_mark_atten.py
+sourceDocs:
+  - docs/2.md
+---
 
-你是否好奇大型语言模型如何在有限的硬件资源下处理超长序列？想了解行业顶尖模型背后的性能优化秘密？本文将带你深入探索 [llm-from-scratch](https://github.com/fangpin/llm-from-scratch) 仓库中的核心优化技术——基于 Triton 实现的 Flash Attention，揭秘如何通过巧妙的算法设计将内存占用从 O(n²) 降低到 O(n√n)，同时大幅提升计算效率。无论你是 AI 研究者、模型优化工程师，还是对底层技术充满好奇的学习者，这篇文章都能为你提供宝贵的技术洞见。
+# Flash Attention 与 Kernel 优化
 
-在大型语言模型（LLM）的训练和推理过程中，注意力机制是计算和内存的瓶颈。为了优化这一核心组件，[llm-from-scratch](https://github.com/fangpin/llm-from-scratch) 仓库中的 `kernel` 目录提供了基于 Triton 语言实现的 Flash Attention，显著提升了模型性能和内存效率。本文将深入剖析这一实现的技术细节。
+你是否好奇大型语言模型如何在有限的硬件资源下处理更长的序列？这一章围绕当前仓库里的 `kernel/` 目录，解释 Triton 版本 Flash Attention 的实现方式，以及它为什么是项目里最重要的 kernel 优化路径。
+
+在大型语言模型（LLM）的训练和推理过程中，注意力机制通常是计算和内存瓶颈。为了优化这一核心组件，仓库在 `kernel/` 中实现了基于 Triton 的 Flash Attention，并配套提供了 reference 版本与 benchmark 脚本。
 
 ## kernel 目录结构
 

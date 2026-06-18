@@ -1,0 +1,36 @@
+---
+import HeroBackground from "./HeroBackground.astro";
+
+interface Props {
+  page: {
+    title: string;
+    eyebrow: string;
+    subtitle: string;
+    actions: { label: string; href: string; variant: string }[];
+    capabilityTags: string[];
+  };
+}
+
+const { page } = Astro.props;
+---
+
+<section class="hero">
+  <HeroBackground />
+  <div class="hero-shell">
+    <div class="hero-copy">
+      <div class="eyebrow">{page.eyebrow}</div>
+      <h1>{page.title}</h1>
+      <p>{page.subtitle}</p>
+    </div>
+    <div class="hero-actions">
+      {page.actions.map((action) => (
+        <a class={`button ${action.variant}`} href={action.href}>{action.label}</a>
+      ))}
+    </div>
+    <div class="capability-tags">
+      {page.capabilityTags.map((tag) => (
+        <span class="capability-tag">{tag}</span>
+      ))}
+    </div>
+  </div>
+</section>

@@ -1,0 +1,28 @@
+---
+import MetricCards from "../components/MetricCards.astro";
+import SectionIntro from "../components/SectionIntro.astro";
+import { siteContent } from "../content/site";
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { SITE_BASE_PATH, toBasePath } from "../lib/locale";
+
+const copy = siteContent.en.pages.benchmarks;
+const basePath = SITE_BASE_PATH;
+const charts = copy.charts.map((chart) => ({
+  ...chart,
+  src: toBasePath(chart.src, basePath),
+}));
+---
+
+<BaseLayout locale="en" currentPath="/benchmarks" title={copy.title} description={copy.description}>
+  <section class="section">
+    <SectionIntro eyebrow="Measured Behavior" title={copy.title} description={copy.description} />
+    <MetricCards cards={copy.cards} />
+    <div class="chart-grid">
+      {charts.map((chart) => (
+        <article class="portal-card">
+          <img src={chart.src} alt={chart.alt} loading="lazy" />
+        </article>
+      ))}
+    </div>
+  </section>
+</BaseLayout>

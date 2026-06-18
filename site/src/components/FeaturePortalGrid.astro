@@ -1,0 +1,18 @@
+---
+interface Props {
+  portals: { title: string; href: string; summary: string }[];
+}
+
+const { portals } = Astro.props;
+---
+
+<section class="section">
+  <div class="portal-grid">
+    {portals.map((portal) => (
+      <a class="portal-card" href={portal.href}>
+        <h3>{portal.title}</h3>
+        <p>{portal.summary}</p>
+      </a>
+    ))}
+  </div>
+</section>

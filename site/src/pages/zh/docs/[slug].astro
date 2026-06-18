@@ -1,0 +1,30 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+import { getDoc, getDocs, getDocSiblings, getRelatedDocs } from "../../../lib/docs";
+
+export function getStaticPaths() {
+  return getDocs("zh").map((entry) => ({
+    params: { slug: entry.slug },
+  }));
+}
+
+const slug = Astro.params.slug ?? "";
+const entry = getDoc("zh", slug);
+if (!entry) {
+  throw new Error(`Missing Chinese doc entry for slug: ${slug}`);
+}
+
+const docs = import.meta.glob("../../../../../docs/zh/*.md", { eager: true }) as Record<string, { frontmatter: { slug: string }; Content: any }>;
+const markdownEntry = Object.values(docs).find((item) => item.frontmatter.slug === slug);
+if (!markdownEntry) {
+  throw new Error(`Missing Chinese markdown module for slug: ${slug}`);
+}
+
+const Content = markdownEntry.Content;
+const { previous, next } = getDocSiblings("zh", slug);
+const related = getRelatedDocs("zh", slug);
+---
+
+<DocsLayout locale="zh" currentPath={`/zh/docs/${slug}`} entry={entry} previous={previous} next={next} related={related}>
+  <Content />
+</DocsLayout>

@@ -4,6 +4,11 @@
 
 This repository contains a from-scratch implementation of a modern decoder-only Transformer model in PyTorch, built for educational purposes. It includes all the essential building blocks of a modern language model, written in a clear, modular, and understandable way. The goal of this project is to provide a comprehensive resource for learning how large language models are built from the ground up.
 
+- [Project Site](https://fangpin.github.io/lm/)
+- [Docs](https://fangpin.github.io/lm/docs/)
+- [Transformer Core](https://fangpin.github.io/lm/docs/transformer-core/)
+- [Distributed Training](https://fangpin.github.io/lm/docs/distributed-training/)
+
 ## Features
 
 * **From-Scratch Implementation:** Every component of the Transformer model is implemented from scratch using PyTorch, providing a deep understanding of the underlying mechanisms.
@@ -171,6 +176,21 @@ uv run -m llm.generating
 ## Benchmarking
 
 For details on model performance and component benchmarks, please see [BENCHMARK.md](BENCHMARK.md).
+
+## Project Site
+
+The repository includes a bilingual Astro project site for GitHub Pages in `site/`.
+
+- [Project Site](https://fangpin.github.io/lm/)
+- [Docs overview](https://fangpin.github.io/lm/docs/)
+- [Chinese docs overview](https://fangpin.github.io/lm/zh/docs/)
+- [Transformer Core chapter](https://fangpin.github.io/lm/docs/transformer-core/)
+- [Distributed Training chapter](https://fangpin.github.io/lm/docs/distributed-training/)
+
+```bash
+npm --prefix site install
+npm --prefix site run dev
+```
 
 ## Testing
 

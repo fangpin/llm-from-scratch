@@ -1,8 +1,27 @@
-# 从 1.56% 到 62.9%：SFT 推理微调实践
+---
+title: gsm8k 上的监督微调
+summary: 解释 alignment/sft.py 如何构造 prompt-completion 数据、做 completion-only loss，并评估准确率与格式遵循率。
+slug: sft-gsm8k
+locale: zh
+group: alignment-workflows
+order: 8
+translationKey: sft-gsm8k
+sourceFiles:
+  - alignment/sft.py
+  - alignment/dataset.py
+  - alignment/r1_prompt.py
+  - alignment/evaluate.py
+  - alignment/drgrpo_grader.py
+  - alignment/args.py
+sourceDocs:
+  - docs/5-sft.md
+---
+
+# gsm8k 上的监督微调
 
 > 读完这篇文章，你将用监督微调（SFT）把一个 1.5B 规模的数学模型在 GSM8K 上的零样本推理正确率从 **1.56% → 62.9%**，同时把输出格式遵循率从 **18.9% → 100%**。我们将完整走通数据集下载、Prompt 架构、训练配置和评估方法，所有代码均来自本仓库 alignment 文件夹，保证可复现与透明。
 
-本文将深入剖析 [llm-from-scratch](https://github.com/fangpin/llm-from-scratch) 仓库中 `alignment` 模块，展示 SFT 的完整流程。
+本文聚焦当前仓库的 `alignment/` 模块，解释 SFT 是如何围绕 gsm8k、R1 风格模板和 Qwen2.5-Math-1.5B 组织起来的。
 
 ## 引言
 

@@ -1,4 +1,22 @@
-# 用从零实现的 REINFORCE/GRPO，把 Qwen2.5-Math-1.5B 在 GSM8K 的 zero-shot 准确率从 1% 拉到 63.4%
+---
+title: gsm8k 上的强化学习微调
+summary: 解释仓库如何实现 reward 设计、group normalization、GRPO clip loss 和多 GPU 角色拆分。
+slug: rlft-gsm8k
+locale: zh
+group: alignment-workflows
+order: 9
+translationKey: rlft-gsm8k
+sourceFiles:
+  - alignment/train_rl.py
+  - alignment/grpo.py
+  - alignment/drgrpo_grader.py
+  - alignment/evaluate.py
+  - alignment/args.py
+sourceDocs:
+  - docs/qwen25-math-gsm8k-rl-finetune.md
+---
+
+# gsm8k 上的强化学习微调
 
 > 一文吃透：不依赖成熟 RL 库，如何在 `alignment` 目录用 REINFORCE、REINFORCE-baseline 与 GRPO 细节化实现数理推理模型的强化学习微调，并实现训练/参考/采样模型的多卡调度。
 

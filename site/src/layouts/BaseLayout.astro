@@ -1,0 +1,33 @@
+---
+import SiteFooter from "../components/SiteFooter.astro";
+import SiteHeader from "../components/SiteHeader.astro";
+import { SITE_BASE_PATH, type Locale } from "../lib/locale";
+import "../styles/global.css";
+
+interface Props {
+  locale: Locale;
+  currentPath: string;
+  title: string;
+  description: string;
+}
+
+const { locale, currentPath, title, description } = Astro.props;
+---
+
+<!doctype html>
+<html lang={locale === "en" ? "en" : "zh-CN"}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="icon" type="image/svg+xml" href={`${SITE_BASE_PATH}favicon.svg`} />
+  </head>
+  <body>
+    <SiteHeader locale={locale} currentPath={currentPath} />
+    <main>
+      <slot />
+    </main>
+    <SiteFooter locale={locale} />
+  </body>
+</html>

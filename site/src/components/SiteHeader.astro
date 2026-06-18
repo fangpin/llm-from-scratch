@@ -1,0 +1,29 @@
+---
+import { siteContent } from "../content/site";
+import type { Locale } from "../lib/locale";
+import { getAlternatePathFor, SITE_BASE_PATH, toBasePath } from "../lib/locale";
+
+interface Props {
+  locale: Locale;
+  currentPath: string;
+}
+
+const { locale, currentPath } = Astro.props;
+const copy = siteContent[locale];
+const basePath = SITE_BASE_PATH;
+const alternateHref = toBasePath(getAlternatePathFor(currentPath), basePath);
+const homeHref = toBasePath(locale === "en" ? "/" : "/zh/", basePath);
+---
+
+<header class="site-header">
+  <a class="brand" href={homeHref}>LLM from Scratch</a>
+  <nav>
+    {copy.navigation.items.map((item) => (
+      <a href={toBasePath(item.href, basePath)}>{item.label}</a>
+    ))}
+  </nav>
+  <div class="actions">
+    <a href={alternateHref}>{copy.navigation.localeSwitchLabel}</a>
+    <a href="https://github.com/fangpin/lm" target="_blank" rel="noreferrer">{copy.navigation.githubLabel}</a>
+  </div>
+</header>

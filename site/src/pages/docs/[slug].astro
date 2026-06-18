@@ -1,0 +1,30 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+import { getDoc, getDocs, getDocSiblings, getRelatedDocs } from "../../lib/docs";
+
+export function getStaticPaths() {
+  return getDocs("en").map((entry) => ({
+    params: { slug: entry.slug },
+  }));
+}
+
+const slug = Astro.params.slug ?? "";
+const entry = getDoc("en", slug);
+if (!entry) {
+  throw new Error(`Missing English doc entry for slug: ${slug}`);
+}
+
+const docs = import.meta.glob("../../../../docs/en/*.md", { eager: true }) as Record<string, { frontmatter: { slug: string }; Content: any }>;
+const markdownEntry = Object.values(docs).find((item) => item.frontmatter.slug === slug);
+if (!markdownEntry) {
+  throw new Error(`Missing English markdown module for slug: ${slug}`);
+}
+
+const Content = markdownEntry.Content;
+const { previous, next } = getDocSiblings("en", slug);
+const related = getRelatedDocs("en", slug);
+---
+
+<DocsLayout locale="en" currentPath={`/docs/${slug}`} entry={entry} previous={previous} next={next} related={related}>
+  <Content />
+</DocsLayout>

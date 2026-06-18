@@ -1,0 +1,61 @@
+---
+import SectionIntro from "../../../components/SectionIntro.astro";
+import { siteContent } from "../../../content/site";
+import BaseLayout from "../../../layouts/BaseLayout.astro";
+import { getDocOverview, getDocsByGroup, getDocHref } from "../../../lib/docs";
+import { SITE_BASE_PATH, toBasePath } from "../../../lib/locale";
+
+const overviewModules = import.meta.glob("../../../../../docs/zh/index.md", { eager: true });
+const copy = siteContent.zh.pages.docs;
+const overview = Object.values(overviewModules)[0] as { Content: any } | undefined;
+if (!overview) throw new Error("Missing Chinese docs overview markdown entry.");
+
+const OverviewContent = overview.Content;
+const groups = getDocsByGroup("zh");
+---
+
+<BaseLayout locale="zh" currentPath="/zh/docs" title={copy.title} description={copy.description}>
+  <section class="section">
+    <SectionIntro eyebrow={copy.eyebrow} title={copy.title} description={copy.description} />
+
+    <div class="container docs-system-map" aria-label="Repository system map">
+      {copy.systemMap.map((item, index) => (
+        <>
+          <span class="capability-tag">{item}</span>
+          {index < copy.systemMap.length - 1 && <span class="docs-system-sep">/</span>}
+        </>
+      ))}
+    </div>
+
+    <div class="container docs-overview-prose">
+      <OverviewContent />
+    </div>
+
+    {groups.map(({ group, entries }) => (
+      <section class="section docs-group-section">
+        <div class="container docs-group-header">
+          <div>
+            <div class="eyebrow">{copy.groups[group].title}</div>
+            <h2>{copy.groups[group].title}</h2>
+          </div>
+          <p>{copy.groups[group].summary}</p>
+        </div>
+
+        <div class="portal-grid docs-chapter-grid">
+          {entries.map((entry) => (
+            <a class="docs-card" aria-label={entry.title} href={toBasePath(getDocHref("zh", entry.slug), SITE_BASE_PATH)}>
+              <span class="docs-card-kicker">{copy.groups[group].title}</span>
+              <h3>{entry.title}</h3>
+              <p>{entry.summary}</p>
+              <div class="docs-source-list">
+                {entry.sourceFiles.slice(0, 3).map((file) => (
+                  <span>{file}</span>
+                ))}
+              </div>
+            </a>
+          ))}
+        </div>
+      </section>
+    ))}
+  </section>
+</BaseLayout>

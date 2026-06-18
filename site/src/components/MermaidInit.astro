@@ -1,0 +1,38 @@
+<script>
+  import mermaid from "mermaid";
+
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: "dark",
+    securityLevel: "loose",
+  });
+
+  async function enhanceMermaidBlocks() {
+    const blocks = Array.from(document.querySelectorAll("pre[data-language='mermaid']"));
+    if (blocks.length === 0) {
+      return;
+    }
+
+    for (const pre of blocks) {
+      if (!(pre instanceof HTMLElement) || pre.dataset.enhanced === "true") {
+        continue;
+      }
+
+      const container = document.createElement("div");
+      container.className = "mermaid";
+      container.textContent = pre.textContent ?? "";
+      pre.dataset.enhanced = "true";
+      pre.replaceWith(container);
+    }
+
+    await mermaid.run({ querySelector: ".mermaid" });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => {
+      void enhanceMermaidBlocks();
+    }, { once: true });
+  } else {
+    void enhanceMermaidBlocks();
+  }
+</script>

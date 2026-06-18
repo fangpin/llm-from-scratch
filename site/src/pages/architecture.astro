@@ -1,0 +1,15 @@
+---
+import ArchitectureFlow from "../components/ArchitectureFlow.astro";
+import SectionIntro from "../components/SectionIntro.astro";
+import { siteContent } from "../content/site";
+import BaseLayout from "../layouts/BaseLayout.astro";
+
+const copy = siteContent.en.pages.architecture;
+---
+
+<BaseLayout locale="en" currentPath="/architecture" title={copy.title} description={copy.description}>
+  <section class="section">
+    <SectionIntro eyebrow="Implemented System" title={copy.title} description={copy.description} />
+    <ArchitectureFlow sections={copy.sections} />
+  </section>
+</BaseLayout>

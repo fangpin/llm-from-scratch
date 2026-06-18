@@ -1,0 +1,78 @@
+---
+import DocsChapterNav from "../components/DocsChapterNav.astro";
+import MermaidInit from "../components/MermaidInit.astro";
+import { siteContent } from "../content/site";
+import BaseLayout from "../layouts/BaseLayout.astro";
+import type { DocEntry } from "../lib/docs";
+import { SITE_BASE_PATH, type Locale, toBasePath } from "../lib/locale";
+
+interface Props {
+  locale: Locale;
+  currentPath: string;
+  entry: DocEntry;
+  previous?: DocEntry;
+  next?: DocEntry;
+  related: DocEntry[];
+}
+
+const { locale, currentPath, entry, previous, next, related } = Astro.props;
+const copy = siteContent[locale].pages.docs;
+const pageTitle = `${entry.title} | ${copy.title}`;
+const docsHomeHref = toBasePath(locale === "en" ? "/docs" : "/zh/docs", SITE_BASE_PATH);
+---
+
+<BaseLayout locale={locale} currentPath={currentPath} title={pageTitle} description={entry.summary}>
+  <section class="section docs-shell">
+    <div class="container docs-breadcrumb">
+      <a href={docsHomeHref}>{copy.labels.docsHome}</a>
+      <span>/</span>
+      <span>{entry.title}</span>
+    </div>
+
+    <div class="container docs-article-shell">
+      <header class="docs-header">
+        <div class="eyebrow">{copy.groups[entry.group].title}</div>
+        <h1>{entry.title}</h1>
+        <p>{entry.summary}</p>
+
+        <div class="docs-meta-grid">
+          <section class="docs-meta-card">
+            <h2>{copy.labels.sourceFiles}</h2>
+            <ul>
+              {entry.sourceFiles.map((file) => (
+                <li>
+                  <a href={`https://github.com/fangpin/lm/blob/master/${file}`} target="_blank" rel="noreferrer">
+                    {file}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          {related.length > 0 && (
+            <section class="docs-meta-card">
+              <h2>{copy.labels.relatedChapters}</h2>
+              <ul>
+                {related.map((item) => (
+                  <li>
+                    <a href={toBasePath(item.locale === "en" ? `/docs/${item.slug}` : `/zh/docs/${item.slug}`, SITE_BASE_PATH)}>
+                      {item.title}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </div>
+      </header>
+
+      <article class="docs-prose">
+        <slot />
+      </article>
+    </div>
+
+    <DocsChapterNav locale={locale} previous={previous} next={next} />
+  </section>
+
+  <MermaidInit />
+</BaseLayout>

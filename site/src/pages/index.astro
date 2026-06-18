@@ -1,0 +1,28 @@
+---
+import FeaturePortalGrid from "../components/FeaturePortalGrid.astro";
+import HeroSection from "../components/HeroSection.astro";
+import ProofBand from "../components/ProofBand.astro";
+import { siteContent } from "../content/site";
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { SITE_BASE_PATH, toBasePath } from "../lib/locale";
+
+const copy = siteContent.en.pages.home;
+const basePath = SITE_BASE_PATH;
+const homeCopy = {
+  ...copy,
+  actions: copy.actions.map((action) => ({
+    ...action,
+    href: toBasePath(action.href, basePath),
+  })),
+  portals: copy.portals.map((portal) => ({
+    ...portal,
+    href: toBasePath(portal.href, basePath),
+  })),
+};
+---
+
+<BaseLayout locale="en" currentPath="/" title={copy.title} description={copy.description}>
+  <HeroSection page={homeCopy} />
+  <ProofBand metrics={copy.proofMetrics} />
+  <FeaturePortalGrid portals={homeCopy.portals} />
+</BaseLayout>
