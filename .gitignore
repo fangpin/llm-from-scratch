@@ -17,3 +17,4 @@ log/memory_snapshot.pickle
 pre_trained
 log/math_rl
 events.out.tfevents.1763173883.mlxlab3h0ntyff6854012c-20250619122308-22b2uc-0bytct-worker.21588.0
+.worktrees
