@@ -5,10 +5,7 @@
 
 本代码库包含一个从零开始用 PyTorch 实现的现代化仅解码器 Transformer 模型，专为教育目的而构建。它包含了现代语言模型的所有基本构建模块，以清晰、模块化和易于理解的方式编写。该项目的目标是为学习如何从头开始构建大型语言模型提供一个全面的资源。
 
-- [项目主页](https://fangpin.github.io/llm-from-scratch/)
-- [文档首页](https://fangpin.github.io/llm-from-scratch/docs/)
-- [Transformer 核心](https://fangpin.github.io/llm-from-scratch/docs/transformer-core/)
-- [分布式训练](https://fangpin.github.io/llm-from-scratch/docs/distributed-training/)
+[我的大模型开源数据](https://fangpin.github.io/llm-from-scratch/)
 
 ## 特性
 
@@ -24,33 +21,32 @@
 * **监督微调 (SFT)**: 包含使用对模型Qwen2.5-Math-1.5B在数据集gsm8k上的完整 SFT 示例.
 * **强化学习微调 (RLFT)**: 包含使用对模型Qwen2.5-Math-1.5B在数据集gsm8k上的完整 RLFT 示例.
 
-- [从零开始的 LLM](#从零开始的-llm)
-  - [特性](#特性)
-  - [已实现的组件](#已实现的组件)
-    - [核心模型与架构 (`llm/transformer.py`)](#核心模型与架构-llmtransformerpy)
-    - [分词器 (`llm/bpe_tokenizer.py`)](#分词器-llmbpe_tokenizerpy)
-    - [训练与推理](#训练与推理)
-    - [优化器和实用工具 (`llm/transformer.py`)](#优化器和实用工具-llmtransformerpy)
-    - [内核优化 (`kernel/`)](#内核优化-kernel)
-    - [并行训练 (`parallel/`)](#并行训练-parallel)
-    - [数据处理 (`data_processing/`)](#数据处理-data_processing)
-  - [使用方法](#使用方法)
-    - [1. 准备数据](#1-准备数据)
-    - [2. 训练分词器](#2-训练分词器)
-    - [3. 训练模型](#3-训练模型)
-    - [4. 生成文本](#4-生成文本)
-  - [基准测试](#基准测试)
-  - [测试](#测试)
-  - [训练](#训练)
-    - [损失曲线](#损失曲线)
-    - [学习率表](#学习率表)
-  - [LLM 输出示例](#llm-输出示例)
-  - [监督微调](#监督微调)
-  - [强化学习微调](#强化学习微调)
-  - [在您自己的数据上进行处理和训练](#在您自己的数据上进行处理和训练)
-  - [许可证](#许可证)
-  - [贡献](#贡献)
-
+* [从零开始的 LLM](#从零开始的-llm)
+  * [特性](#特性)
+  * [已实现的组件](#已实现的组件)
+    * [核心模型与架构 (`llm/transformer.py`)](#核心模型与架构-llmtransformerpy)
+    * [分词器 (`llm/bpe_tokenizer.py`)](#分词器-llmbpe_tokenizerpy)
+    * [训练与推理](#训练与推理)
+    * [优化器和实用工具 (`llm/transformer.py`)](#优化器和实用工具-llmtransformerpy)
+    * [内核优化 (`kernel/`)](#内核优化-kernel)
+    * [并行训练 (`parallel/`)](#并行训练-parallel)
+    * [数据处理 (`data_processing/`)](#数据处理-data_processing)
+  * [使用方法](#使用方法)
+    * [1. 准备数据](#1-准备数据)
+    * [2. 训练分词器](#2-训练分词器)
+    * [3. 训练模型](#3-训练模型)
+    * [4. 生成文本](#4-生成文本)
+  * [基准测试](#基准测试)
+  * [测试](#测试)
+  * [训练](#训练)
+    * [损失曲线](#损失曲线)
+    * [学习率表](#学习率表)
+  * [LLM 输出示例](#llm-输出示例)
+  * [监督微调](#监督微调)
+  * [强化学习微调](#强化学习微调)
+  * [在您自己的数据上进行处理和训练](#在您自己的数据上进行处理和训练)
+  * [许可证](#许可证)
+  * [贡献](#贡献)
 
 ## 已实现的组件
 
@@ -182,11 +178,11 @@ uv run -m llm.generating
 
 仓库内包含一个用于 GitHub Pages 的 Astro 双语项目站，位于 `site/`。
 
-- [项目主页](https://fangpin.github.io/llm-from-scratch/)
-- [文档首页](https://fangpin.github.io/llm-from-scratch/docs/)
-- [中文文档首页](https://fangpin.github.io/llm-from-scratch/zh/docs/)
-- [Transformer 核心章节](https://fangpin.github.io/llm-from-scratch/docs/transformer-core/)
-- [分布式训练章节](https://fangpin.github.io/llm-from-scratch/docs/distributed-training/)
+* [项目主页](https://fangpin.github.io/llm-from-scratch/)
+* [文档首页](https://fangpin.github.io/llm-from-scratch/docs/)
+* [中文文档首页](https://fangpin.github.io/llm-from-scratch/zh/docs/)
+* [Transformer 核心章节](https://fangpin.github.io/llm-from-scratch/docs/transformer-core/)
+* [分布式训练章节](https://fangpin.github.io/llm-from-scratch/docs/distributed-training/)
 
 ```bash
 npm --prefix site install
