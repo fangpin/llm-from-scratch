@@ -5,7 +5,7 @@
 
 本代码库包含一个从零开始用 PyTorch 实现的现代化仅解码器 Transformer 模型，专为教育目的而构建。它包含了现代语言模型的所有基本构建模块，以清晰、模块化和易于理解的方式编写。该项目的目标是为学习如何从头开始构建大型语言模型提供一个全面的资源。
 
-[我的大模型开源数据](https://fangpin.github.io/llm-from-scratch/)
+[我的大模型开源书籍](https://fangpin.github.io/llm-from-scratch/)
 
 ## 特性
 
