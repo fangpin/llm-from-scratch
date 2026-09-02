@@ -4,10 +4,7 @@
 
 This repository contains a from-scratch implementation of a modern decoder-only Transformer model in PyTorch, built for educational purposes. It includes all the essential building blocks of a modern language model, written in a clear, modular, and understandable way. The goal of this project is to provide a comprehensive resource for learning how large language models are built from the ground up.
 
-- [Project Site](https://fangpin.github.io/llm-from-scratch/)
-- [Docs](https://fangpin.github.io/llm-from-scratch/docs/)
-- [Transformer Core](https://fangpin.github.io/llm-from-scratch/docs/transformer-core/)
-- [Distributed Training](https://fangpin.github.io/llm-from-scratch/docs/distributed-training/)
+[My open source book for LLM](https://fangpin.github.io/llm-from-scratch/)
 
 ## Features
 
@@ -23,33 +20,32 @@ This repository contains a from-scratch implementation of a modern decoder-only 
 * **Supervised Fine-tuning (SFT)**: Containing fully SFT example on model Qwen2.5-Math-1.5B and dataset gsm8k.
 * **Reinforcement Learning Fine-tuning (RLFT)**: Containing fully RLFT example on model Qwen2.5-Math-1.5B and dataset gsm8k.
 
-- [LLM from Scratch](#llm-from-scratch)
-  - [Features](#features)
-  - [Implemented Components](#implemented-components)
-    - [Core Model \& Architecture (`llm/transformer.py`)](#core-model--architecture-llmtransformerpy)
-    - [Tokenizer (`llm/bpe_tokenizer.py`)](#tokenizer-llmbpe_tokenizerpy)
-    - [Training and Inference](#training-and-inference)
-    - [Optimizers and Utilities (`llm/transformer.py`)](#optimizers-and-utilities-llmtransformerpy)
-    - [Kernel Optimizations (`kernel/`)](#kernel-optimizations-kernel)
-    - [Parallel Training (`parallel/`)](#parallel-training-parallel)
-    - [Data Processing (`data_processing/`)](#data-processing-data_processing)
-  - [Usage](#usage)
-    - [1. Preparing the Data](#1-preparing-the-data)
-    - [2. Training the Tokenizer](#2-training-the-tokenizer)
-    - [3. Training the Model](#3-training-the-model)
-    - [4. Generating Text](#4-generating-text)
-  - [Benchmarking](#benchmarking)
-  - [Testing](#testing)
-  - [Training](#training)
-    - [Loss Curve](#loss-curve)
-    - [Learning Rate Schedule](#learning-rate-schedule)
-  - [Example LLM Output](#example-llm-output)
-  - [Supervised Fine-tuning](#supervised-fine-tuning)
-  - [Reinforcement Learning Fine-tuning](#reinforcement-learning-fine-tuning)
-  - [Processing \& training on your own data](#processing--training-on-your-own-data)
-  - [License](#license)
-  - [Contributing](#contributing)
-
+* [LLM from Scratch](#llm-from-scratch)
+  * [Features](#features)
+  * [Implemented Components](#implemented-components)
+    * [Core Model \& Architecture (`llm/transformer.py`)](#core-model--architecture-llmtransformerpy)
+    * [Tokenizer (`llm/bpe_tokenizer.py`)](#tokenizer-llmbpe_tokenizerpy)
+    * [Training and Inference](#training-and-inference)
+    * [Optimizers and Utilities (`llm/transformer.py`)](#optimizers-and-utilities-llmtransformerpy)
+    * [Kernel Optimizations (`kernel/`)](#kernel-optimizations-kernel)
+    * [Parallel Training (`parallel/`)](#parallel-training-parallel)
+    * [Data Processing (`data_processing/`)](#data-processing-data_processing)
+  * [Usage](#usage)
+    * [1. Preparing the Data](#1-preparing-the-data)
+    * [2. Training the Tokenizer](#2-training-the-tokenizer)
+    * [3. Training the Model](#3-training-the-model)
+    * [4. Generating Text](#4-generating-text)
+  * [Benchmarking](#benchmarking)
+  * [Testing](#testing)
+  * [Training](#training)
+    * [Loss Curve](#loss-curve)
+    * [Learning Rate Schedule](#learning-rate-schedule)
+  * [Example LLM Output](#example-llm-output)
+  * [Supervised Fine-tuning](#supervised-fine-tuning)
+  * [Reinforcement Learning Fine-tuning](#reinforcement-learning-fine-tuning)
+  * [Processing \& training on your own data](#processing--training-on-your-own-data)
+  * [License](#license)
+  * [Contributing](#contributing)
 
 ## Implemented Components
 
@@ -181,11 +177,11 @@ For details on model performance and component benchmarks, please see [BENCHMARK
 
 The repository includes a bilingual Astro project site for GitHub Pages in `site/`.
 
-- [Project Site](https://fangpin.github.io/llm-from-scratch/)
-- [Docs overview](https://fangpin.github.io/llm-from-scratch/docs/)
-- [Chinese docs overview](https://fangpin.github.io/llm-from-scratch/zh/docs/)
-- [Transformer Core chapter](https://fangpin.github.io/llm-from-scratch/docs/transformer-core/)
-- [Distributed Training chapter](https://fangpin.github.io/llm-from-scratch/docs/distributed-training/)
+* [Project Site](https://fangpin.github.io/llm-from-scratch/)
+* [Docs overview](https://fangpin.github.io/llm-from-scratch/docs/)
+* [Chinese docs overview](https://fangpin.github.io/llm-from-scratch/zh/docs/)
+* [Transformer Core chapter](https://fangpin.github.io/llm-from-scratch/docs/transformer-core/)
+* [Distributed Training chapter](https://fangpin.github.io/llm-from-scratch/docs/distributed-training/)
 
 ```bash
 npm --prefix site install
