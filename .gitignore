@@ -23,3 +23,6 @@ site/dist
 site/.astro
 site/test-results
 site/playwright-report
+.venv/
+docs/_build/
+dist/platform-posts/
