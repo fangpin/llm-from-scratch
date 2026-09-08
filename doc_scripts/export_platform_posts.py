@@ -65,7 +65,16 @@ def built_image_names(slug: str) -> list[str]:
     return HTML_IMG_RE.findall(html_path.read_text(encoding="utf-8"))
 
 
-def rewrite_chapter(chapter: Path, site_url: str, raw_base: str | None) -> tuple[str, int, int]:
+def platform_footer(author: str, author_url: str, source_url: str) -> str:
+    author_text = f"[{author}]({author_url})" if author_url else author
+    return f"---\n\n作者：{author_text}\n\n原文链接：[{source_url}]({source_url})\n"
+
+
+def chapter_source_url(site_url: str, chapter: Path) -> str:
+    return f"{site_url.rstrip('/')}/chapters/{chapter.stem}.html"
+
+
+def rewrite_chapter(chapter: Path, site_url: str, raw_base: str | None, footer: str = "") -> tuple[str, int, int]:
     text = chapter.read_text(encoding="utf-8")
     text = CONTENTS_RE.sub("", text)  # MyST-only directive, meaningless off-Sphinx
     images = list(IMAGE_RE.finditer(text))
@@ -94,6 +103,8 @@ def rewrite_chapter(chapter: Path, site_url: str, raw_base: str | None) -> tuple
         return sub
 
     text = IMAGE_RE.sub(sub_factory(), text)
+    if footer:
+        text = text.rstrip() + "\n\n" + footer
     return text, len(images), rewritten
 
 
@@ -106,6 +117,12 @@ def main() -> None:
     args = parser.parse_args()
 
     meta = json.loads(PROJECT_JSON.read_text(encoding="utf-8")) if PROJECT_JSON.exists() else {}
+    author = meta.get("author", "Pin Fang")
+    author_url = meta.get("author_url", "https://github.com/fangpin")
+    source_site_url = (args.site_url or default_site_url(meta) or "").rstrip("/") + "/"
+    if source_site_url == "/":
+        sys.exit("error: unknown site URL. Pass --site-url, set github_repo/site_url in "
+                 "docs/project.json, or configure a git origin remote.")
 
     site_url = ""
     raw_base = None
@@ -117,10 +134,7 @@ def main() -> None:
         branch = meta.get("github_branch") or os.environ.get("GITHUB_REF_NAME", "main")
         raw_base = f"https://raw.githubusercontent.com/{slug}/{branch}"
     else:
-        site_url = (args.site_url or default_site_url(meta) or "").rstrip("/") + "/"
-        if site_url == "/":
-            sys.exit("error: unknown site URL. Pass --site-url, set github_repo/site_url in "
-                     "docs/project.json, or configure a git origin remote.")
+        site_url = source_site_url
         if not BUILD_DIR.exists():
             sys.exit("error: docs/_build/html not found. Run `make html` first.")
 
@@ -130,7 +144,9 @@ def main() -> None:
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     for chapter in chapters:
-        text, total, rewritten = rewrite_chapter(chapter, site_url, raw_base)
+        source_url = chapter_source_url(source_site_url, chapter)
+        footer = platform_footer(author, author_url, source_url)
+        text, total, rewritten = rewrite_chapter(chapter, site_url, raw_base, footer=footer)
         if total and rewritten < total:
             print(f"  warning: {chapter.name}: only {rewritten}/{total} images rewritten "
                   "(built HTML missing?)", file=sys.stderr)

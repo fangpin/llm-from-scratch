@@ -79,7 +79,7 @@ Lecture 2 用 arithmetic intensity 来量化这一点：它表示每搬运 1 byt
 
 下图是 roofline 模型：不同 workload 的 arithmetic intensity 决定了它落在带宽限制区还是算力限制区。
 
-![roofline 模型连接 arithmetic intensity 与硬件性能上限](../assets/images/02-llm/image-04.webp)
+![roofline 模型连接 arithmetic intensity 与硬件性能上限](../assets/images/02-llm/image-04.png)
 
 这个结论解释了很多 LLM 系统现象。训练阶段包含大量大矩阵乘法，容易把 accelerator 打满；而 decode 阶段更像 matrix-vector product，需要反复读取权重和 KV cache，因此经常被内存带宽限制。
 
