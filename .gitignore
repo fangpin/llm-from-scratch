@@ -26,3 +26,4 @@ site/playwright-report
 .venv/
 docs/_build/
 dist/platform-posts/
+docs/project.json
