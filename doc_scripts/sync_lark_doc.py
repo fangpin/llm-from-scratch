@@ -39,6 +39,13 @@ CONTENT_TYPE_EXT = {
     "image/webp": ".webp",
 }
 
+IMAGE_MAGIC = (
+    (b"\xff\xd8\xff", ".jpg"),
+    (b"\x89PNG\r\n\x1a\n", ".png"),
+    (b"GIF87a", ".gif"),
+    (b"GIF89a", ".gif"),
+)
+
 TITLE_TAG_RE = re.compile(r"^<title>([\s\S]*?)</title>\s*")
 H1_RE = re.compile(r"^#\s+\S")
 H2_RE = re.compile(r"^#{2,6}\s+\S")
@@ -246,27 +253,35 @@ def split_chapters(markdown: str) -> tuple[str | None, str, list[str]]:
     return doc_title, preface, chapters
 
 
-def extension_for(data: bytes, content_type: str | None) -> str:
-    if data[:3] == b"\xff\xd8\xff":
-        return ".jpg"
-    if data[:8] == b"\x89PNG\r\n\x1a\n":
-        return ".png"
-    if data[:6].startswith(b"GIF"):
-        return ".gif"
+def extension_for(data: bytes, content_type: str | None) -> str | None:
+    """Extension for an image payload, or None when the payload is not an image.
+
+    Feishu answers image requests without valid credentials with HTTP 200 and an
+    HTML login page. Such a payload must never be stored, otherwise the tree ends
+    up with files that are named .png but cannot be decoded by any browser.
+    """
+    for magic, ext in IMAGE_MAGIC:
+        if data.startswith(magic):
+            return ext
     if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         return ".webp"
     ct = (content_type or "").split(";")[0].strip().lower()
-    return CONTENT_TYPE_EXT.get(ct, ".png")
+    return CONTENT_TYPE_EXT.get(ct)
 
 
-def localize_images(content: str, slug: str) -> str:
-    """Download remote images into docs/source/assets and rewrite references."""
+def localize_images(content: str, slug: str) -> tuple[str, int]:
+    """Download remote images into docs/source/assets and rewrite references.
+
+    Returns the rewritten chapter and the number of images that could not be
+    localized; those keep their remote URL so the failure stays visible.
+    """
     urls: list[str] = []
     for m in IMAGE_RE.finditer(content):
         url = m.group(2)
         if url.startswith(("http://", "https://")) and url not in urls:
             urls.append(url)
     replacements: dict[str, str] = {}
+    failures = 0
     for i, url in enumerate(urls, 1):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -275,6 +290,11 @@ def localize_images(content: str, slug: str) -> str:
                 ext = extension_for(data, resp.headers.get("Content-Type"))
         except (urllib.error.URLError, OSError) as exc:
             print(f"  warning: failed to download image ({exc}): {url[:120]}", file=sys.stderr)
+            failures += 1
+            continue
+        if ext is None:
+            print(f"  warning: response is not an image, skipping: {url[:120]}", file=sys.stderr)
+            failures += 1
             continue
         dest = IMAGES_DIR / slug
         dest.mkdir(parents=True, exist_ok=True)
@@ -287,7 +307,7 @@ def localize_images(content: str, slug: str) -> str:
             return f"![{m.group(1)}]({replacements[url]}{m.group(3) or ''})"
         return m.group(0)
 
-    return IMAGE_RE.sub(sub, content)
+    return IMAGE_RE.sub(sub, content), failures
 
 
 def add_page_toc(content: str) -> str:
@@ -354,11 +374,14 @@ def main() -> None:
 
     seen: set[str] = set()
     slugs = []
+    failed_images = 0
     for index, content in enumerate(chapters, 1):
         heading = content.split("\n", 1)[0]
         slug = slugify(heading.lstrip("# ").strip(), index, seen)
         slugs.append(slug)
-        content = add_page_toc(localize_images(content, slug))
+        content, failures = localize_images(content, slug)
+        failed_images += failures
+        content = add_page_toc(content)
         (CHAPTERS_DIR / f"{slug}.md").write_text(content + "\n", encoding="utf-8")
         print(f"  chapter: {slug}")
 
@@ -377,6 +400,9 @@ def main() -> None:
         encoding="utf-8",
     )
     print(f"synced {len(slugs)} chapter(s) -> docs/source (title: {title})")
+    if failed_images:
+        fail(f"{failed_images} image(s) could not be downloaded and still point at Feishu. "
+             "Run `lark-cli auth login` and sync again before building the docs.")
 
 
 if __name__ == "__main__":
