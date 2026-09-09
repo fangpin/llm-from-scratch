@@ -20,6 +20,7 @@ import sys
 import unicodedata
 import urllib.error
 import urllib.request
+from urllib.parse import unquote, urlparse
 from datetime import datetime
 from pathlib import Path
 
@@ -72,7 +73,7 @@ def fail(message: str) -> None:
     sys.exit(f"error: {message}")
 
 
-def run_lark_cli(argv: list[str]) -> dict:
+def run_lark_cli(argv: list[str], cwd: Path | None = None) -> dict:
     """Run a lark-cli command and return its JSON envelope."""
     if not shutil.which("lark-cli"):
         fail("lark-cli not found. Install it and run `lark-cli auth login` first.")
@@ -81,7 +82,7 @@ def run_lark_cli(argv: list[str]) -> dict:
         "LARKSUITE_CLI_NO_SKILLS_NOTIFIER": "1",
         "LARKSUITE_CLI_NO_UPDATE_NOTIFIER": "1",
     }
-    proc = subprocess.run(["lark-cli", *argv], capture_output=True, text=True, env=env)
+    proc = subprocess.run(["lark-cli", *argv], capture_output=True, text=True, env=env, cwd=cwd)
     if proc.returncode != 0:
         fail(f"lark-cli failed with status {proc.returncode}:\n{proc.stderr or proc.stdout}")
     out = proc.stdout
@@ -246,7 +247,7 @@ def split_chapters(markdown: str) -> tuple[str | None, str, list[str]]:
     return doc_title, preface, chapters
 
 
-def extension_for(data: bytes, content_type: str | None) -> str:
+def extension_for(data: bytes, content_type: str | None) -> str | None:
     if data[:3] == b"\xff\xd8\xff":
         return ".jpg"
     if data[:8] == b"\x89PNG\r\n\x1a\n":
@@ -256,7 +257,50 @@ def extension_for(data: bytes, content_type: str | None) -> str:
     if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         return ".webp"
     ct = (content_type or "").split(";")[0].strip().lower()
-    return CONTENT_TYPE_EXT.get(ct, ".png")
+    return CONTENT_TYPE_EXT.get(ct)
+
+
+def lark_file_token_from_url(url: str) -> str | None:
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    if not (
+        host == "feishu.cn"
+        or host.endswith(".feishu.cn")
+        or host == "larkoffice.com"
+        or host.endswith(".larkoffice.com")
+        or host == "larksuite.com"
+        or host.endswith(".larksuite.com")
+    ):
+        return None
+    parts = [unquote(part) for part in parsed.path.split("/") if part]
+    if len(parts) >= 2 and parts[0] == "file":
+        return parts[1]
+    return None
+
+
+def fetch_lark_media(token: str, dest: Path, basename: str) -> tuple[bytes, str] | None:
+    """Fetch a protected Feishu media token through lark-cli and return its saved bytes."""
+    dest.mkdir(parents=True, exist_ok=True)
+    try:
+        payload = run_lark_cli([
+            "docs", "+media-preview", "--token", token, "--output", basename,
+            "--overwrite", "--json",
+        ], cwd=dest)
+    except SystemExit as exc:
+        print(f"  warning: failed to fetch Feishu media ({exc}): {token}", file=sys.stderr)
+        return None
+    data = payload.get("data", {})
+    saved_path = Path(data.get("saved_path", ""))
+    if not saved_path.is_file():
+        print(f"  warning: Feishu media download did not create a file: {token}", file=sys.stderr)
+        return None
+    image = saved_path.read_bytes()
+    ext = extension_for(image, data.get("content_type"))
+    if ext is None:
+        saved_path.unlink(missing_ok=True)
+        print(f"  warning: Feishu media is not an image: {token}", file=sys.stderr)
+        return None
+    return image, ext
 
 
 def localize_images(content: str, slug: str) -> str:
@@ -268,6 +312,18 @@ def localize_images(content: str, slug: str) -> str:
             urls.append(url)
     replacements: dict[str, str] = {}
     for i, url in enumerate(urls, 1):
+        dest = IMAGES_DIR / slug
+        basename = f"image-{i:02d}"
+        token = lark_file_token_from_url(url)
+        if token:
+            fetched = fetch_lark_media(token, dest, basename)
+            if fetched is None:
+                continue
+            data, ext = fetched
+            output = dest / f"{basename}{ext}"
+            output.write_bytes(data)
+            replacements[url] = f"../assets/images/{slug}/{output.name}"
+            continue
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
             with urllib.request.urlopen(req, timeout=60) as resp:
@@ -276,7 +332,9 @@ def localize_images(content: str, slug: str) -> str:
         except (urllib.error.URLError, OSError) as exc:
             print(f"  warning: failed to download image ({exc}): {url[:120]}", file=sys.stderr)
             continue
-        dest = IMAGES_DIR / slug
+        if ext is None:
+            print(f"  warning: downloaded URL is not an image: {url[:120]}", file=sys.stderr)
+            continue
         dest.mkdir(parents=True, exist_ok=True)
         (dest / f"image-{i:02d}{ext}").write_bytes(data)
         replacements[url] = f"../assets/images/{slug}/image-{i:02d}{ext}"
