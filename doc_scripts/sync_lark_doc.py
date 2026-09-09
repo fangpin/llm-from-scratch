@@ -17,8 +17,10 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import unicodedata
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -38,6 +40,20 @@ CONTENT_TYPE_EXT = {
     "image/svg+xml": ".svg",
     "image/webp": ".webp",
 }
+
+IMAGE_MAGIC = (
+    (b"\xff\xd8\xff", ".jpg"),
+    (b"\x89PNG\r\n\x1a\n", ".png"),
+    (b"GIF87a", ".gif"),
+    (b"GIF89a", ".gif"),
+)
+
+# Media on these hosts is session-protected: an anonymous GET is answered with
+# the passport login page, so it has to go through authenticated lark-cli.
+LARK_MEDIA_DOMAINS = ("feishu.cn", "feishu.net", "larkoffice.com", "larksuite.com")
+LARK_MEDIA_PATH_RE = re.compile(r"/(?:file|medias)/([A-Za-z0-9_-]{10,})")
+# docs skill: +media-download can answer permission_denied/403 where +media-preview works
+MEDIA_COMMANDS = (["docs", "+media-download", "--type", "media"], ["docs", "+media-preview"])
 
 TITLE_TAG_RE = re.compile(r"^<title>([\s\S]*?)</title>\s*")
 H1_RE = re.compile(r"^#\s+\S")
@@ -72,9 +88,15 @@ def fail(message: str) -> None:
     sys.exit(f"error: {message}")
 
 
-def run_lark_cli(argv: list[str]) -> dict:
-    """Run a lark-cli command and return its JSON envelope."""
+def run_lark_cli(argv: list[str], check: bool = True) -> dict | None:
+    """Run a lark-cli command and return its JSON envelope.
+
+    With check=False a failing command returns None instead of aborting the sync.
+    """
     if not shutil.which("lark-cli"):
+        if not check:
+            print("  warning: lark-cli not found", file=sys.stderr)
+            return None
         fail("lark-cli not found. Install it and run `lark-cli auth login` first.")
     env = {
         **os.environ,
@@ -82,15 +104,24 @@ def run_lark_cli(argv: list[str]) -> dict:
         "LARKSUITE_CLI_NO_UPDATE_NOTIFIER": "1",
     }
     proc = subprocess.run(["lark-cli", *argv], capture_output=True, text=True, env=env)
+    payload = None
     if proc.returncode != 0:
-        fail(f"lark-cli failed with status {proc.returncode}:\n{proc.stderr or proc.stdout}")
-    out = proc.stdout
-    try:
-        payload = json.loads(out[out.index("{"): out.rindex("}") + 1])
-    except (ValueError, json.JSONDecodeError):
-        fail(f"unexpected lark-cli output:\n{out[:500]}")
-    if not payload.get("ok"):
-        fail(f"lark-cli returned an error:\n{json.dumps(payload, indent=2, ensure_ascii=False)}")
+        error = f"lark-cli failed with status {proc.returncode}:\n{proc.stderr or proc.stdout}"
+    else:
+        out = proc.stdout
+        try:
+            payload = json.loads(out[out.index("{"): out.rindex("}") + 1])
+        except (ValueError, json.JSONDecodeError):
+            error = f"unexpected lark-cli output:\n{out[:500]}"
+        else:
+            error = None if payload.get("ok") else (
+                f"lark-cli returned an error:\n{json.dumps(payload, indent=2, ensure_ascii=False)}"
+            )
+    if error:
+        if not check:
+            print(f"  warning: {error}", file=sys.stderr)
+            return None
+        fail(error)
     return payload
 
 
@@ -98,6 +129,7 @@ def fetch_lark_markdown(doc: str) -> str:
     payload = run_lark_cli([
         "docs", "+fetch", "--doc", doc, "--doc-format", "markdown", "--format", "json",
     ])
+    assert payload is not None  # check=True aborts instead of returning None
     return payload["data"]["document"]["content"]
 
 
@@ -107,12 +139,11 @@ def csv_cell_to_md(cell: str) -> str:
 
 def fetch_sheet_markdown(token: str, sheet_id: str) -> str | None:
     """Read an embedded sheet via lark-cli and render it as a GFM table."""
-    try:
-        payload = run_lark_cli([
-            "sheets", "+csv-get", "--spreadsheet-token", token, "--sheet-id", sheet_id,
-            "--range", SHEET_FETCH_RANGE, "--format", "json",
-        ])
-    except SystemExit:
+    payload = run_lark_cli([
+        "sheets", "+csv-get", "--spreadsheet-token", token, "--sheet-id", sheet_id,
+        "--range", SHEET_FETCH_RANGE, "--format", "json",
+    ], check=False)
+    if payload is None:
         return None
     data = payload.get("data", {})
     if data.get("has_more"):
@@ -246,35 +277,97 @@ def split_chapters(markdown: str) -> tuple[str | None, str, list[str]]:
     return doc_title, preface, chapters
 
 
-def extension_for(data: bytes, content_type: str | None) -> str:
-    if data[:3] == b"\xff\xd8\xff":
-        return ".jpg"
-    if data[:8] == b"\x89PNG\r\n\x1a\n":
-        return ".png"
-    if data[:6].startswith(b"GIF"):
-        return ".gif"
+def extension_for(data: bytes, content_type: str | None) -> str | None:
+    """Extension for an image payload, or None when the payload is not an image.
+
+    Feishu answers image requests without valid credentials with HTTP 200 and an
+    HTML login page. Such a payload must never be stored, otherwise the tree ends
+    up with files that are named .png but cannot be decoded by any browser.
+    """
+    for magic, ext in IMAGE_MAGIC:
+        if data.startswith(magic):
+            return ext
     if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         return ".webp"
     ct = (content_type or "").split(";")[0].strip().lower()
-    return CONTENT_TYPE_EXT.get(ct, ".png")
+    return CONTENT_TYPE_EXT.get(ct)
 
 
-def localize_images(content: str, slug: str) -> str:
-    """Download remote images into docs/source/assets and rewrite references."""
+def lark_media_token(url: str) -> str | None:
+    """file_token of a Feishu-hosted image, or None for a plain public image URL.
+
+    lark-cli renders document images as tenant URLs such as
+    https://<tenant>.larkoffice.com/file/<file_token>. Those need the Feishu
+    session, which `lark-cli auth login` gives to lark-cli but not to us, so the
+    token has to be downloaded through the CLI's authenticated media commands.
+    """
+    parsed = urllib.parse.urlsplit(url)
+    host = (parsed.hostname or "").lower()
+    if not any(host == domain or host.endswith(f".{domain}") for domain in LARK_MEDIA_DOMAINS):
+        return None
+    if m := LARK_MEDIA_PATH_RE.search(parsed.path):
+        return m.group(1)
+    query = urllib.parse.parse_qs(parsed.query)
+    for key in ("file_token", "token"):
+        if values := query.get(key):
+            return values[0]
+    return None
+
+
+def download_lark_media(token: str) -> bytes | None:
+    """Download document media by file_token through authenticated lark-cli."""
+    for command in MEDIA_COMMANDS:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "media"  # no extension: lark-cli appends the real one
+            argv = [*command, "--token", token, "--output", str(out), "--format", "json"]
+            if run_lark_cli(argv, check=False) is None:
+                continue
+            written = sorted(Path(tmp).glob("media*"))
+            if written:
+                return written[0].read_bytes()
+    return None
+
+
+def download_public_image(url: str) -> tuple[bytes, str | None] | None:
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            return resp.read(), resp.headers.get("Content-Type")
+    except (urllib.error.URLError, OSError) as exc:
+        print(f"  warning: failed to download image ({exc}): {url[:120]}", file=sys.stderr)
+        return None
+
+
+def localize_images(content: str, slug: str) -> tuple[str, int]:
+    """Download remote images into docs/source/assets and rewrite references.
+
+    Returns the rewritten chapter and the number of images that could not be
+    localized; those keep their remote URL so the failure stays visible.
+    """
     urls: list[str] = []
     for m in IMAGE_RE.finditer(content):
         url = m.group(2)
         if url.startswith(("http://", "https://")) and url not in urls:
             urls.append(url)
     replacements: dict[str, str] = {}
+    failures = 0
     for i, url in enumerate(urls, 1):
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                data = resp.read()
-                ext = extension_for(data, resp.headers.get("Content-Type"))
-        except (urllib.error.URLError, OSError) as exc:
-            print(f"  warning: failed to download image ({exc}): {url[:120]}", file=sys.stderr)
+        content_type = None
+        if token := lark_media_token(url):
+            data = download_lark_media(token)
+            if data is None:
+                print(f"  warning: lark-cli could not download media {token}: {url[:120]}",
+                      file=sys.stderr)
+        else:
+            downloaded = download_public_image(url)
+            data, content_type = downloaded if downloaded else (None, None)
+        if data is None:
+            failures += 1
+            continue
+        ext = extension_for(data, content_type)
+        if ext is None:
+            print(f"  warning: response is not an image, skipping: {url[:120]}", file=sys.stderr)
+            failures += 1
             continue
         dest = IMAGES_DIR / slug
         dest.mkdir(parents=True, exist_ok=True)
@@ -287,7 +380,7 @@ def localize_images(content: str, slug: str) -> str:
             return f"![{m.group(1)}]({replacements[url]}{m.group(3) or ''})"
         return m.group(0)
 
-    return IMAGE_RE.sub(sub, content)
+    return IMAGE_RE.sub(sub, content), failures
 
 
 def add_page_toc(content: str) -> str:
@@ -354,11 +447,14 @@ def main() -> None:
 
     seen: set[str] = set()
     slugs = []
+    failed_images = 0
     for index, content in enumerate(chapters, 1):
         heading = content.split("\n", 1)[0]
         slug = slugify(heading.lstrip("# ").strip(), index, seen)
         slugs.append(slug)
-        content = add_page_toc(localize_images(content, slug))
+        content, failures = localize_images(content, slug)
+        failed_images += failures
+        content = add_page_toc(content)
         (CHAPTERS_DIR / f"{slug}.md").write_text(content + "\n", encoding="utf-8")
         print(f"  chapter: {slug}")
 
@@ -377,6 +473,10 @@ def main() -> None:
         encoding="utf-8",
     )
     print(f"synced {len(slugs)} chapter(s) -> docs/source (title: {title})")
+    if failed_images:
+        fail(f"{failed_images} image(s) could not be downloaded and still point at Feishu. "
+             "Check `lark-cli whoami` (identity and doc media permissions), then sync again "
+             "before building the docs.")
 
 
 if __name__ == "__main__":
