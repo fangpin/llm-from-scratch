@@ -6,6 +6,33 @@ This repository contains a from-scratch implementation of a modern decoder-only 
 
 [My open source book for LLM](https://fangpin.github.io/llm-from-scratch/)
 
+## PDF and EPUB
+
+The **Deploy docs** GitHub Actions workflow builds PDF and EPUB editions from
+the Sphinx sources in `docs/source/`, alongside the HTML site. It runs on pushes
+to `main` or `master`, or manually from **Actions → Deploy docs → Run workflow**.
+Download **book-pdf** and **book-epub** from the completed run's **Artifacts** section.
+
+To build locally, install the Python documentation dependencies and a TeX Live
+distribution with XeLaTeX, latexmk, Chinese language support (including the Fandol
+fonts), FreeFont, and dvisvgm. On Ubuntu, install the system dependencies with:
+
+```bash
+sudo apt-get update
+sudo apt-get install --no-install-recommends -y \
+  latexmk texlive-xetex texlive-lang-chinese texlive-latex-extra \
+  texlive-fonts-recommended fonts-freefont-otf dvisvgm
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-docs.txt
+make -f doc.mk docs-ebooks
+```
+
+The output files are `docs/_build/latex/build-llm-from-scratch.pdf` and
+`docs/_build/epub/build-llm-from-scratch.epub`. Use `docs-pdf` or `docs-epub` to build
+one format. EPUB formulas are rendered as SVG images for offline reading; HTML
+continues to use MathJax. These targets use the checked-in chapters and do not
+require Feishu access.
+
 ## Features
 
 * **From-Scratch Implementation:** Every component of the Transformer model is implemented from scratch using PyTorch, providing a deep understanding of the underlying mechanisms.

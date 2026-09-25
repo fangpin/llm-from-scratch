@@ -27,3 +27,4 @@ site/playwright-report
 docs/_build/
 dist/platform-posts/
 docs/project.json
+output/pdf

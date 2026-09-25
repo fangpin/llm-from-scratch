@@ -3,8 +3,10 @@ name: Deploy docs
 on:
   push:
     branches: [main, master]
+  workflow_dispatch:
 
 permissions:
+  contents: read
   pages: write
   id-token: write
 
@@ -13,6 +15,39 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ebooks:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Sphinx and TeX dependencies
+        run: |
+          python -m pip install -r requirements-docs.txt
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            latexmk texlive-xetex texlive-lang-chinese texlive-latex-extra \
+            texlive-fonts-recommended fonts-freefont-otf dvisvgm
+      - name: Build PDF
+        run: make -f doc.mk docs-pdf SPHINX=sphinx-build
+      - name: Upload PDF
+        uses: actions/upload-artifact@v4
+        with:
+          name: book-pdf
+          path: docs/_build/latex/build-llm-from-scratch.pdf
+          if-no-files-found: error
+      - name: Build EPUB
+        run: make -f doc.mk docs-epub SPHINX=sphinx-build
+      - name: Upload EPUB
+        uses: actions/upload-artifact@v4
+        with:
+          name: book-epub
+          path: docs/_build/epub/build-llm-from-scratch.epub
+          if-no-files-found: error
+
   build-deploy:
     runs-on: ubuntu-latest
     environment:

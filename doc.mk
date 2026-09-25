@@ -6,7 +6,7 @@ VENV := .venv
 PY := $(VENV)/bin/python
 SPHINX := $(VENV)/bin/sphinx-build
 
-.PHONY: docs-install docs-sync docs-html docs docs-serve docs-clean
+.PHONY: docs-install docs-sync docs-html docs-pdf docs-epub docs-ebooks docs docs-serve docs-clean
 
 docs-install:
 	python3 -m venv $(VENV)
@@ -28,6 +28,14 @@ endif
 
 docs-html:
 	$(SPHINX) -b html docs/source docs/_build/html
+
+docs-pdf:
+	$(SPHINX) -M latexpdf docs/source docs/_build -W --keep-going
+
+docs-epub:
+	$(SPHINX) -b epub docs/source docs/_build/epub -W --keep-going
+
+docs-ebooks: docs-pdf docs-epub
 
 docs-export: docs-html
 	$(PY) doc_scripts/export_platform_posts.py --image-base "$(or $(IMAGE_BASE),pages)"

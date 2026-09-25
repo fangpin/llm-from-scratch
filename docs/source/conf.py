@@ -19,7 +19,7 @@ html_context = {
     "author_url": author_url,
 }
 
-extensions = ["myst_parser"]
+extensions = ["myst_parser", "sphinx.ext.imgmath"]
 myst_enable_extensions = [
     "amsmath",
     "colon_fence",
@@ -30,6 +30,39 @@ myst_enable_extensions = [
 myst_heading_anchors = 3
 source_suffix = {".md": "markdown"}
 exclude_patterns = ["_build"]
+
+# Keep web math interactive; render EPUB math as self-contained SVG images.
+html_math_renderer = "mathjax"
+imgmath_image_format = "svg"
+imgmath_latex = "xelatex"
+imgmath_latex_preamble = r"\usepackage[UTF8,scheme=plain,fontset=fandol]{ctex}"
+
+latex_engine = "xelatex"
+latex_use_xindy = False
+latex_documents = [
+    ("index", "build-llm-from-scratch.tex", project, author, "manual"),
+]
+latex_elements = {
+    "papersize": "a4paper",
+    "pointsize": "10pt",
+    "preamble": r"\usepackage[UTF8,scheme=plain,fontset=fandol]{ctex}",
+}
+
+epub_basename = "build-llm-from-scratch"
+epub_title = project
+epub_author = author
+epub_publisher = author
+epub_language = "zh-CN"
+epub_identifier = "https://github.com/fangpin/llm-from-scratch"
+epub_scheme = "URL"
+epub_show_urls = "no"
+epub_use_index = False
+epub_exclude_files = ["search.html"]
+
+
+def setup(app):
+    app.add_config_value("epub_math_renderer", "imgmath", "env")
+
 
 html_theme = "sphinx_rtd_theme"
 html_title = project
