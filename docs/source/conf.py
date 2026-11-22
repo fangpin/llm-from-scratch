@@ -2,7 +2,10 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "doc_scripts"))
 
 meta_path = Path(__file__).resolve().parent.parent / "project.json"
 meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
@@ -19,7 +22,7 @@ html_context = {
     "author_url": author_url,
 }
 
-extensions = ["myst_parser", "sphinx.ext.imgmath"]
+extensions = ["myst_parser", "sphinx.ext.imgmath", "lark_callouts"]
 myst_enable_extensions = [
     "amsmath",
     "colon_fence",
